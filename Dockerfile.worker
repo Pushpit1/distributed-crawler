@@ -1,0 +1,28 @@
+# Stage 1: Build the Go binary statically
+FROM golang:alpine AS builder
+
+WORKDIR /app
+
+# Copy go.mod and go.sum files and download dependencies first
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the rest of the application files
+COPY . .
+
+# Compile the Worker binary statically
+RUN CGO_ENABLED=0 GOOS=linux go build -o worker cmd/worker/main.go
+
+# Stage 2: Final minimal runtime environment
+FROM alpine:latest
+
+# Install ca-certificates (CRITICAL: Workers fetch SSL/TLS HTTPS sites so they need root authority certs!)
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /app
+
+# Copy the compiled binary from the builder stage
+COPY --from=builder /app/worker .
+
+# Run the worker executable by default in daemon mode
+ENTRYPOINT ["/app/worker"]

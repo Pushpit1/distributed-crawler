@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: crawler_user
+      POSTGRES_PASSWORD: crawler_password
+      POSTGRES_DB: crawler_db
+    ports:
+      - "5433:5432" # Maps host port 5433 to container port 5432 (preventing host conflicts)
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crawler_user -d crawler_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile.master
+    ports:
+      - "8080:8080"
+    environment:
+      REDIS_ADDR: redis:6379
+      DATABASE_URL: postgres://crawler_user:crawler_password@postgres:5432/crawler_db?sslmode=disable
+      PORT: 8080
+      POLITENESS_MS: 1000 # Enforce 1-second delay per domain
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    # Start the Master with seeds and clear flags automatically
+    command: ["-clear", "https://go.dev"]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      MASTER_URL: http://master:8080
+    depends_on:
+      master:
+        condition: service_started # Wait for master process to start
+    command: ["-timeout", "15"]
+
+volumes:
+  pgdata:
