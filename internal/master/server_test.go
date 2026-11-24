@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +38,30 @@ func TestServerHealthAndCORS(t *testing.T) {
 
 	if corsW.Code != http.StatusOK {
 		t.Errorf("Expected 200 on OPTIONS preflight, got %d", corsW.Code)
+	}
+
+	// Test HandleConfig
+	configReq := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	configW := httptest.NewRecorder()
+	srv.HandleConfig(configW, configReq)
+	if configW.Code != http.StatusOK {
+		t.Errorf("Expected 200 on config, got %d", configW.Code)
+	}
+
+	// Test HandleReset Level UI
+	resetReq := httptest.NewRequest(http.MethodPost, "/api/reset", strings.NewReader(`{"level":"ui"}`))
+	resetW := httptest.NewRecorder()
+	srv.HandleReset(resetW, resetReq)
+	if resetW.Code != http.StatusOK {
+		t.Errorf("Expected 200 on reset ui, got %d", resetW.Code)
+	}
+
+	// Test HandleReset Level Production without phrase (should fail with 403 Forbidden)
+	badProdReq := httptest.NewRequest(http.MethodPost, "/api/reset", strings.NewReader(`{"level":"production"}`))
+	badProdW := httptest.NewRecorder()
+	srv.HandleReset(badProdW, badProdReq)
+	if badProdW.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 on unconfirmed production reset, got %d", badProdW.Code)
 	}
 }
 

@@ -109,15 +109,23 @@ func main() {
 	// 7. Setup route mappings
 	mux := http.NewServeMux()
 
-	// Health check
+	// Health & Readiness checks
 	mux.HandleFunc("GET /health", srv.HandleHealth)
 	mux.HandleFunc("GET /api/health", srv.HandleHealth)
+	mux.HandleFunc("GET /ready", srv.HandleReady)
+	mux.HandleFunc("GET /api/ready", srv.HandleReady)
 
-	// Worker Registration
+	// Worker Registration & Protocol
 	mux.HandleFunc("POST /register", srv.HandleRegister)
 	mux.HandleFunc("POST /api/register", srv.HandleRegister)
 	mux.HandleFunc("OPTIONS /register", srv.HandleCORS)
 	mux.HandleFunc("OPTIONS /api/register", srv.HandleCORS)
+
+	// Worker Heartbeat Telemetry
+	mux.HandleFunc("POST /heartbeat", srv.HandleHeartbeat)
+	mux.HandleFunc("POST /api/heartbeat", srv.HandleHeartbeat)
+	mux.HandleFunc("OPTIONS /heartbeat", srv.HandleCORS)
+	mux.HandleFunc("OPTIONS /api/heartbeat", srv.HandleCORS)
 
 	// Worker Task Polling
 	mux.HandleFunc("POST /poll", srv.HandlePoll)
@@ -131,29 +139,52 @@ func main() {
 	mux.HandleFunc("OPTIONS /report", srv.HandleCORS)
 	mux.HandleFunc("OPTIONS /api/report", srv.HandleCORS)
 
-	// Search Indexed Pages
-	mux.HandleFunc("GET /search", srv.HandleSearch)
-	mux.HandleFunc("GET /api/search", srv.HandleSearch)
-	mux.HandleFunc("OPTIONS /search", srv.HandleCORS)
-	mux.HandleFunc("OPTIONS /api/search", srv.HandleCORS)
+	// Telemetry, Workers & Metrics
+	mux.HandleFunc("GET /status", srv.HandleStatus)
+	mux.HandleFunc("GET /api/status", srv.HandleStatus)
+	mux.HandleFunc("OPTIONS /status", srv.HandleCORS)
+	mux.HandleFunc("OPTIONS /api/status", srv.HandleCORS)
 
-	// Reset Cluster State
-	mux.HandleFunc("POST /reset", srv.HandleReset)
-	mux.HandleFunc("POST /api/reset", srv.HandleReset)
-	mux.HandleFunc("OPTIONS /reset", srv.HandleCORS)
-	mux.HandleFunc("OPTIONS /api/reset", srv.HandleCORS)
+	mux.HandleFunc("GET /api/metrics", srv.HandleMetrics)
+	mux.HandleFunc("OPTIONS /api/metrics", srv.HandleCORS)
 
-	// Submit Custom Seeds
+	mux.HandleFunc("GET /api/workers", srv.HandleWorkers)
+	mux.HandleFunc("OPTIONS /api/workers", srv.HandleCORS)
+
+	mux.HandleFunc("GET /api/activity", srv.HandleActivity)
+	mux.HandleFunc("OPTIONS /api/activity", srv.HandleCORS)
+
+	// Crawl Job Management
 	mux.HandleFunc("POST /submit", srv.HandleSubmitSeeds)
 	mux.HandleFunc("POST /api/submit", srv.HandleSubmitSeeds)
 	mux.HandleFunc("OPTIONS /submit", srv.HandleCORS)
 	mux.HandleFunc("OPTIONS /api/submit", srv.HandleCORS)
 
-	// Cluster Real-time Status
-	mux.HandleFunc("GET /status", srv.HandleStatus)
-	mux.HandleFunc("GET /api/status", srv.HandleStatus)
-	mux.HandleFunc("OPTIONS /status", srv.HandleCORS)
-	mux.HandleFunc("OPTIONS /api/status", srv.HandleCORS)
+	mux.HandleFunc("GET /api/jobs", srv.HandleJobs)
+	mux.HandleFunc("OPTIONS /api/jobs", srv.HandleCORS)
+	mux.HandleFunc("POST /api/jobs/", srv.HandleJobOperation)
+	mux.HandleFunc("OPTIONS /api/jobs/", srv.HandleCORS)
+
+	// Search & Domain Exploration
+	mux.HandleFunc("GET /search", srv.HandleSearch)
+	mux.HandleFunc("GET /api/search", srv.HandleSearch)
+	mux.HandleFunc("OPTIONS /search", srv.HandleCORS)
+	mux.HandleFunc("OPTIONS /api/search", srv.HandleCORS)
+
+	mux.HandleFunc("GET /api/pages/", srv.HandlePageDetails)
+	mux.HandleFunc("OPTIONS /api/pages/", srv.HandleCORS)
+
+	mux.HandleFunc("GET /api/domains", srv.HandleDomains)
+	mux.HandleFunc("OPTIONS /api/domains", srv.HandleCORS)
+
+	// Tiered Administration & Config
+	mux.HandleFunc("POST /reset", srv.HandleReset)
+	mux.HandleFunc("POST /api/reset", srv.HandleReset)
+	mux.HandleFunc("OPTIONS /reset", srv.HandleCORS)
+	mux.HandleFunc("OPTIONS /api/reset", srv.HandleCORS)
+
+	mux.HandleFunc("GET /api/config", srv.HandleConfig)
+	mux.HandleFunc("OPTIONS /api/config", srv.HandleCORS)
 
 	// Serve frontend static files from the "web" directory
 	mux.Handle("GET /", http.FileServer(http.Dir("web")))

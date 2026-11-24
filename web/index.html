@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GOPHER CRAWLER — Distributed Crawl Engine & Telemetry Console</title>
-    <meta name="description" content="High-performance distributed web crawler index, live telemetry monitor, and search console.">
+    <title>GOPHER CRAWLER — Distributed Web Crawling & Search Platform</title>
+    <meta name="description" content="Production-inspired distributed web crawling, indexing, and telemetry platform.">
     
-    <!-- Design Fonts: Inter + JetBrains Mono -->
+    <!-- Typography: Inter (UI) + JetBrains Mono (Telemetry) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -14,369 +14,591 @@
     <link rel="stylesheet" href="style.css">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
 </head>
-<body class="theme-dark">
-    <!-- Precision Background Grid & Glow Accents -->
+<body class="theme-obsidian">
+    <!-- Precision Background Grid Overlay -->
     <div class="bg-grid-overlay" aria-hidden="true"></div>
-    <div class="glow-spot glow-spot-1" aria-hidden="true"></div>
-    <div class="glow-spot glow-spot-2" aria-hidden="true"></div>
+    <div class="glow-accent accent-cyan" aria-hidden="true"></div>
+    <div class="glow-accent accent-emerald" aria-hidden="true"></div>
 
-    <div class="app-container">
-        <!-- Top Navigation Bar -->
-        <header class="app-nav">
-            <div class="nav-brand-section">
-                <div class="brand-badge">
-                    <span class="brand-bolt">⚡</span>
-                    <span class="brand-core">GOPHER</span>
-                    <span class="brand-tag">ENGINE</span>
-                </div>
-                <div class="system-status-indicator" id="system-status-pill">
-                    <span class="status-pulse-dot"></span>
-                    <span class="status-label" id="status-label-text">SYS: NOMINAL</span>
-                    <span class="status-mode" id="status-mode-tag">[EDGE]</span>
+    <div class="platform-layout">
+        <!-- Sidebar Navigation (10 Main Sections) -->
+        <aside class="platform-sidebar" id="sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-glyph">⚡</div>
+                <div class="brand-text-group">
+                    <span class="brand-title">GOPHER</span>
+                    <span class="brand-sub">DISTRIBUTED CRAWLER</span>
                 </div>
             </div>
 
-            <div class="nav-actions-section">
-                <!-- Auto-Crawl Switch -->
-                <div class="control-toggle-group" title="Automatically dispatch crawl steps at periodic intervals">
-                    <span class="toggle-label">AUTO-CRAWL</span>
-                    <button type="button" id="auto-crawl-toggle" class="switch-btn" role="switch" aria-checked="false">
-                        <span class="switch-slider"></span>
-                    </button>
+            <!-- Mode & Health Badge -->
+            <div class="sidebar-health-status" id="sidebar-status-box">
+                <div class="status-indicator-dot" id="global-pulse-dot"></div>
+                <div class="status-meta">
+                    <span class="status-name" id="global-status-text">SYSTEM ONLINE</span>
+                    <span class="status-mode-tag" id="global-mode-tag">[MODE A: CLUSTER]</span>
                 </div>
+            </div>
 
-                <!-- Manual Crawl Step Button -->
-                <button type="button" id="crawl-step-btn" class="nav-btn primary-action-btn" title="Dispatch one crawl task from frontier queue">
-                    <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                    <span>CRAWL STEP</span>
+            <nav class="sidebar-nav">
+                <div class="nav-section-label">PLATFORM</div>
+                <button type="button" class="nav-item active" data-view="view-overview">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                    <span>Overview</span>
+                </button>
+                <button type="button" class="nav-item" data-view="view-explorer">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg>
+                    <span>Crawl Explorer</span>
+                </button>
+                <button type="button" class="nav-item" data-view="view-jobs">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                    <span>Jobs</span>
+                    <span class="nav-counter-badge" id="sidebar-job-count">0</span>
+                </button>
+                <button type="button" class="nav-item" data-view="view-search">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <span>Search Index</span>
+                </button>
+                <button type="button" class="nav-item" data-view="view-domains">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                    <span>Domains</span>
                 </button>
 
-                <!-- Settings / Connection Button -->
-                <button type="button" id="open-settings-btn" class="nav-btn secondary-btn" title="Configure Backend Cluster URL">
-                    <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                    <span>CONFIG</span>
+                <div class="nav-section-label">INFRASTRUCTURE</div>
+                <button type="button" class="nav-item" data-view="view-workers">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+                    <span>Worker Fleet</span>
+                    <span class="nav-counter-badge text-emerald" id="sidebar-worker-count">0</span>
+                </button>
+                <button type="button" class="nav-item" data-view="view-activity">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                    <span>Activity Logs</span>
+                </button>
+                <button type="button" class="nav-item" data-view="view-analytics">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                    <span>Analytics</span>
                 </button>
 
-                <!-- Wipe & Reset Button -->
-                <button type="button" id="open-reset-btn" class="nav-btn danger-btn" title="Purge database and reset crawler state">
-                    <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-                    <span>WIPE & RESET</span>
+                <div class="nav-section-label">MANAGEMENT</div>
+                <button type="button" class="nav-item" data-view="view-settings">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    <span>Settings & Resets</span>
                 </button>
-            </div>
-        </header>
+                <button type="button" class="nav-item" data-view="view-docs">
+                    <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                    <span>Documentation</span>
+                </button>
+            </nav>
 
-        <!-- Main Telemetry Ribbon / Metrics Grid -->
-        <section class="telemetry-grid" aria-label="System Metrics">
-            <div class="telemetry-card">
-                <div class="card-meta">
-                    <span class="meta-label">PAGES INDEXED</span>
-                    <span class="meta-sub">POSTGRES / DB</span>
-                </div>
-                <div class="card-body">
-                    <div class="metric-val" id="metric-pages">0</div>
-                    <div class="metric-trend text-emerald" id="metric-pages-trend">+0 pending</div>
-                </div>
-                <div class="card-footer-bar bar-emerald"></div>
+            <div class="sidebar-footer">
+                <span class="footer-git">v1.2.0 • Go + Redis + Postgres</span>
             </div>
+        </aside>
 
-            <div class="telemetry-card">
-                <div class="card-meta">
-                    <span class="meta-label">DOMAINS TRAVERSED</span>
-                    <span class="meta-sub">UNIQUE HOSTS</span>
+        <!-- Main Content Viewport -->
+        <div class="platform-main">
+            <!-- Global Top Header Bar -->
+            <header class="platform-header">
+                <div class="header-breadcrumb">
+                    <span class="bc-prefix">CRAWLER //</span>
+                    <span class="bc-current" id="breadcrumb-title">OVERVIEW</span>
                 </div>
-                <div class="card-body">
-                    <div class="metric-val" id="metric-domains">0</div>
-                    <div class="metric-trend text-cyan" id="metric-domains-trend">0 active TLDs</div>
-                </div>
-                <div class="card-footer-bar bar-cyan"></div>
-            </div>
 
-            <div class="telemetry-card">
-                <div class="card-meta">
-                    <span class="meta-label">FRONTIER QUEUE</span>
-                    <span class="meta-sub">REDIS FIFO</span>
-                </div>
-                <div class="card-body">
-                    <div class="metric-val" id="metric-queue">0</div>
-                    <div class="metric-trend text-amber" id="metric-queue-trend">Politeness delay 1000ms</div>
-                </div>
-                <div class="card-footer-bar bar-amber"></div>
-            </div>
+                <div class="header-actions">
+                    <!-- Auto-Crawl Toggle -->
+                    <div class="telemetry-switch-group" title="Continuous background worker loop">
+                        <span class="switch-label">AUTO-CRAWL</span>
+                        <button type="button" id="auto-crawl-toggle" class="telemetry-switch" role="switch" aria-checked="false">
+                            <span class="switch-thumb"></span>
+                        </button>
+                    </div>
 
-            <div class="telemetry-card">
-                <div class="card-meta">
-                    <span class="meta-label">CLUSTER UPTIME</span>
-                    <span class="meta-sub">RUNTIME</span>
-                </div>
-                <div class="card-body">
-                    <div class="metric-val" id="metric-uptime">0s</div>
-                    <div class="metric-trend text-muted" id="metric-backend-tag">Vercel Serverless</div>
-                </div>
-                <div class="card-footer-bar bar-purple"></div>
-            </div>
-        </section>
-
-        <!-- Main Workspace: Left Explorer / Right Infrastructure -->
-        <main class="workspace-grid">
-            <!-- Left Column: Search & Seed Management Console -->
-            <section class="console-panel primary-console">
-                <!-- Tab Header -->
-                <div class="console-tabs-header">
-                    <button type="button" class="tab-btn active" data-tab="search-tab">
-                        <span class="tab-indicator"></span>
-                        <span class="tab-title">INDEX EXPLORER</span>
+                    <!-- Crawl Step Button -->
+                    <button type="button" id="crawl-step-btn" class="telemetry-btn primary-btn" title="Dispatch one crawl task from frontier queue">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                        <span>CRAWL STEP</span>
                     </button>
-                    <button type="button" class="tab-btn" data-tab="seed-tab">
-                        <span class="tab-indicator"></span>
-                        <span class="tab-title">SEED ENGINE</span>
-                    </button>
-                    <button type="button" class="tab-btn" data-tab="domain-tab">
-                        <span class="tab-indicator"></span>
-                        <span class="tab-title">DOMAIN METRICS</span>
+
+                    <!-- Quick Reset Button -->
+                    <button type="button" id="quick-reset-btn" class="telemetry-btn danger-btn" title="Open Tiered Reset Console">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                        <span>RESET</span>
                     </button>
                 </div>
+            </header>
 
-                <!-- Tab 1: Search & Index Explorer -->
-                <div class="tab-pane active" id="search-tab">
-                    <!-- Search Input Form -->
-                    <form id="search-form" class="console-search-bar" role="search">
-                        <div class="search-input-field">
+            <!-- VIEW 1: OVERVIEW -->
+            <section class="view-panel active" id="view-overview">
+                <!-- Top Metric Cards -->
+                <div class="telemetry-metrics-grid">
+                    <div class="metric-block">
+                        <div class="metric-header">
+                            <span class="metric-title">PAGES INDEXED</span>
+                            <span class="metric-tag">RELATIONAL DB</span>
+                        </div>
+                        <div class="metric-value-row">
+                            <span class="metric-big" id="ov-pages-count">0</span>
+                            <span class="metric-sub text-emerald" id="ov-pages-sub">100% persisted</span>
+                        </div>
+                        <div class="metric-bar bar-emerald"></div>
+                    </div>
+
+                    <div class="metric-block">
+                        <div class="metric-header">
+                            <span class="metric-title">DOMAINS DISCOVERED</span>
+                            <span class="metric-tag">UNIQUE HOSTS</span>
+                        </div>
+                        <div class="metric-value-row">
+                            <span class="metric-big" id="ov-domains-count">0</span>
+                            <span class="metric-sub text-cyan" id="ov-domains-sub">Politeness enabled</span>
+                        </div>
+                        <div class="metric-bar bar-cyan"></div>
+                    </div>
+
+                    <div class="metric-block">
+                        <div class="metric-header">
+                            <span class="metric-title">FRONTIER QUEUE</span>
+                            <span class="metric-tag">REDIS FIFO</span>
+                        </div>
+                        <div class="metric-value-row">
+                            <span class="metric-big" id="ov-queue-count">0</span>
+                            <span class="metric-sub text-amber" id="ov-queue-sub">0 leases active</span>
+                        </div>
+                        <div class="metric-bar bar-amber"></div>
+                    </div>
+
+                    <div class="metric-block">
+                        <div class="metric-header">
+                            <span class="metric-title">WORKER FLEET</span>
+                            <span class="metric-tag">GO DAEMONS</span>
+                        </div>
+                        <div class="metric-value-row">
+                            <span class="metric-big" id="ov-workers-count">0</span>
+                            <span class="metric-sub text-emerald" id="ov-workers-sub">0 tasks active</span>
+                        </div>
+                        <div class="metric-bar bar-purple"></div>
+                    </div>
+                </div>
+
+                <!-- Two Column Overview Layout -->
+                <div class="overview-grid">
+                    <!-- Left: Recent Crawl Stream -->
+                    <div class="card-panel">
+                        <div class="panel-header">
+                            <div class="panel-title-group">
+                                <h3 class="panel-heading">RECENT CRAWL DISPATCHES</h3>
+                                <p class="panel-caption">Live index entries reporting response status and discovery latency</p>
+                            </div>
+                            <button type="button" class="action-link-btn" data-view-target="view-search">VIEW ALL</button>
+                        </div>
+                        <div class="recent-pages-stream" id="ov-recent-pages">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Right: Worker Fleet Snapshot & System Health -->
+                    <div class="card-panel">
+                        <div class="panel-header">
+                            <div class="panel-title-group">
+                                <h3 class="panel-heading">WORKER FLEET SNAPSHOT</h3>
+                                <p class="panel-caption">Autonomous worker nodes reporting telemetry</p>
+                            </div>
+                            <button type="button" class="action-link-btn" data-view-target="view-workers">FLEET VIEW</button>
+                        </div>
+                        <div class="workers-snapshot-list" id="ov-workers-list">
+                            <!-- Populated dynamically -->
+                        </div>
+
+                        <!-- System Uptime & Memory -->
+                        <div class="system-health-strip">
+                            <div class="health-meta-item">
+                                <span class="h-label">COORDINATOR UPTIME</span>
+                                <span class="h-val font-mono" id="ov-uptime-val">0s</span>
+                            </div>
+                            <div class="health-meta-item">
+                                <span class="h-label">SSRF SECURITY</span>
+                                <span class="h-val text-emerald font-mono">ACTIVE (ENFORCED)</span>
+                            </div>
+                            <div class="health-meta-item">
+                                <span class="h-label">TASK VISIBILITY</span>
+                                <span class="h-val text-cyan font-mono">60s LEASE RECOVERY</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 2: CRAWL EXPLORER -->
+            <section class="view-panel" id="view-explorer">
+                <div class="card-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <h3 class="panel-heading">CRAWL DISPATCHER & SEED INJECTOR</h3>
+                            <p class="panel-caption">Configure target seeds, crawl depth, response ceilings, and domain constraints</p>
+                        </div>
+                    </div>
+
+                    <form id="crawl-explorer-form" class="config-form">
+                        <div class="form-group">
+                            <label class="form-label" for="explorer-url-input">TARGET SEED URL(S)</label>
+                            <textarea 
+                                id="explorer-url-input" 
+                                class="form-textarea" 
+                                rows="3" 
+                                placeholder="https://example.com&#10;https://go.dev" 
+                                required
+                            ></textarea>
+                            <span class="form-hint">Submit single or multiple absolute URLs (one per line). SSRF validation is automatically enforced.</span>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group flex-1">
+                                <label class="form-label" for="explorer-depth-input">MAX CRAWL DEPTH</label>
+                                <input type="number" id="explorer-depth-input" class="form-input" min="1" max="10" value="3">
+                            </div>
+                            <div class="form-group flex-1">
+                                <label class="form-label" for="explorer-pages-input">PAGE CEILING</label>
+                                <input type="number" id="explorer-pages-input" class="form-input" min="5" max="5000" value="100">
+                            </div>
+                            <div class="form-group flex-1">
+                                <label class="form-label" for="explorer-politeness-input">POLITENESS DELAY (MS)</label>
+                                <input type="number" id="explorer-politeness-input" class="form-input" min="100" max="10000" value="1000">
+                            </div>
+                        </div>
+
+                        <!-- Presets -->
+                        <div class="presets-section">
+                            <span class="form-label">CURATED SEED PRESETS</span>
+                            <div class="presets-row">
+                                <button type="button" class="preset-pill" data-seed="https://go.dev">Go.dev Official</button>
+                                <button type="button" class="preset-pill" data-seed="https://news.ycombinator.com">Hacker News</button>
+                                <button type="button" class="preset-pill" data-seed="https://en.wikipedia.org/wiki/Distributed_computing">Wikipedia (Distributed)</button>
+                                <button type="button" class="preset-pill" data-seed="https://github.com/golang/go">GitHub (golang/go)</button>
+                            </div>
+                        </div>
+
+                        <div class="form-footer">
+                            <button type="submit" class="telemetry-btn primary-btn btn-lg" id="explorer-submit-btn">
+                                <span>LAUNCH CRAWL JOB</span>
+                            </button>
+                        </div>
+                    </form>
+
+                    <div id="explorer-feedback" class="feedback-banner hidden"></div>
+                </div>
+            </section>
+
+            <!-- VIEW 3: JOBS -->
+            <section class="view-panel" id="view-jobs">
+                <div class="card-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <h3 class="panel-heading">CRAWL JOBS MANAGER</h3>
+                            <p class="panel-caption">Track active and historical crawl jobs, seed queues, and execution progress</p>
+                        </div>
+                        <div class="filter-group" id="job-status-filters">
+                            <button type="button" class="filter-pill active" data-filter="ALL">ALL</button>
+                            <button type="button" class="filter-pill" data-filter="RUNNING">RUNNING</button>
+                            <button type="button" class="filter-pill" data-filter="COMPLETED">COMPLETED</button>
+                            <button type="button" class="filter-pill" data-filter="CANCELLED">CANCELLED</button>
+                        </div>
+                    </div>
+
+                    <div class="data-table-container">
+                        <table class="data-table" id="jobs-table">
+                            <thead>
+                                <tr>
+                                    <th>JOB ID</th>
+                                    <th>JOB NAME</th>
+                                    <th>STATUS</th>
+                                    <th>DEPTH</th>
+                                    <th>CRAWLED</th>
+                                    <th>CREATED AT</th>
+                                    <th>ACTIONS</th>
+                                </tr>
+                            </thead>
+                            <tbody id="jobs-tbody">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 4: SEARCH INDEX -->
+            <section class="view-panel" id="view-search">
+                <div class="card-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <h3 class="panel-heading">POSTGRESQL FULL-TEXT SEARCH</h3>
+                            <p class="panel-caption">Ranked search index across titles, descriptions, headings, and URLs</p>
+                        </div>
+                    </div>
+
+                    <!-- Search Input & Filters -->
+                    <form id="search-index-form" class="search-bar-row">
+                        <div class="search-field-box">
                             <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                             <input 
                                 type="text" 
-                                id="search-input" 
-                                placeholder="Search indexed pages by keyword, URL, or domain..." 
+                                id="search-main-input" 
+                                placeholder="Type keywords, domain, or URL to query index..." 
                                 autocomplete="off"
-                                spellcheck="false"
                             >
-                            <button type="button" id="clear-search-btn" class="clear-btn hidden" title="Clear search query">✕</button>
+                            <button type="button" id="search-clear-btn" class="clear-cross hidden">✕</button>
                         </div>
-                        <button type="submit" class="action-btn search-submit-btn">QUERY</button>
+                        <button type="submit" class="telemetry-btn primary-btn">SEARCH</button>
                     </form>
 
-                    <!-- Filter & View Bar -->
-                    <div class="results-control-bar">
+                    <!-- Status Filter Chips -->
+                    <div class="search-filter-ribbon">
                         <div class="filter-chips">
-                            <button type="button" class="chip-btn active" data-filter="all">ALL (<span id="count-all">0</span>)</button>
-                            <button type="button" class="chip-btn" data-filter="200">200 OK (<span id="count-200">0</span>)</button>
-                            <button type="button" class="chip-btn" data-filter="error">ERRORS (<span id="count-err">0</span>)</button>
+                            <button type="button" class="chip-item active" data-filter="0">ALL STATUS</button>
+                            <button type="button" class="chip-item" data-filter="200">200 OK</button>
+                            <button type="button" class="chip-item" data-filter="403">403 FORBIDDEN</button>
+                            <button type="button" class="chip-item" data-filter="500">5xx ERRORS</button>
                         </div>
-                        <div class="results-meta-info" id="results-meta-text">Showing latest crawled records</div>
+                        <span class="results-tally-label" id="search-tally-text">Ready to search</span>
                     </div>
 
                     <!-- Search Results Stream -->
-                    <div class="results-scroll-container">
-                        <!-- Loading State -->
-                        <div id="results-loading" class="results-state hidden">
-                            <div class="scanner-line"></div>
-                            <span class="state-text">Scanning inverted index...</span>
-                        </div>
-
-                        <!-- Empty State -->
-                        <div id="results-empty" class="results-state hidden">
-                            <div class="empty-icon-box">∅</div>
-                            <h4 class="empty-title">No Index Matches</h4>
-                            <p class="empty-desc">No indexed pages matching query. Submit new seed URLs or try a broader search phrase.</p>
-                            <div class="empty-quick-tags">
-                                <span>Try searching:</span>
-                                <button type="button" class="preset-tag" data-query="Go">Go</button>
-                                <button type="button" class="preset-tag" data-query="Wikipedia">Wikipedia</button>
-                                <button type="button" class="preset-tag" data-query="Web crawler">Crawler</button>
-                                <button type="button" class="preset-tag" data-query="Hacker News">News</button>
-                            </div>
-                        </div>
-
-                        <!-- Results List -->
-                        <div id="results-list" class="results-cards-list"></div>
-                    </div>
-                </div>
-
-                <!-- Tab 2: Seed Engine & URL Injector -->
-                <div class="tab-pane" id="seed-tab">
-                    <div class="seed-section-intro">
-                        <h4 class="section-heading">URL INJECTION & POLITE ENQUEUING</h4>
-                        <p class="section-subtext">Submit target URLs into the Redis-backed Frontier. Links will be deduplicated against the visited set and scheduled for crawling.</p>
-                    </div>
-
-                    <!-- Seed Submit Form -->
-                    <form id="seed-form" class="seed-input-form">
-                        <div class="seed-field-wrapper">
-                            <label for="seed-input" class="field-label">TARGET SEED URL</label>
-                            <div class="input-with-action">
-                                <input 
-                                    type="url" 
-                                    id="seed-input" 
-                                    placeholder="https://example.com" 
-                                    required 
-                                    autocomplete="off"
-                                >
-                                <button type="submit" class="action-btn enqueue-btn" id="submit-seed-btn">
-                                    <span>ENQUEUE & CRAWL</span>
-                                </button>
-                            </div>
-                            <span class="input-hint">Must be absolute HTTP or HTTPS URL. Robots.txt rules and politeness delay will be respected.</span>
-                        </div>
-                    </form>
-
-                    <!-- Quick Seed Presets -->
-                    <div class="seed-presets-block">
-                        <span class="field-label">QUICK SEED PRESETS</span>
-                        <div class="preset-cards-grid">
-                            <button type="button" class="preset-card" data-seed="https://go.dev">
-                                <span class="preset-domain">go.dev</span>
-                                <span class="preset-name">The Go Programming Language</span>
-                            </button>
-                            <button type="button" class="preset-card" data-seed="https://news.ycombinator.com">
-                                <span class="preset-domain">news.ycombinator.com</span>
-                                <span class="preset-name">Hacker News</span>
-                            </button>
-                            <button type="button" class="preset-card" data-seed="https://en.wikipedia.org/wiki/Distributed_computing">
-                                <span class="preset-domain">wikipedia.org</span>
-                                <span class="preset-name">Distributed Computing</span>
-                            </button>
-                            <button type="button" class="preset-card" data-seed="https://github.com/golang/go">
-                                <span class="preset-domain">github.com</span>
-                                <span class="preset-name">Go Standard Library</span>
-                            </button>
-                            <button type="button" class="preset-card" data-seed="https://arxiv.org/list/cs.DC/recent">
-                                <span class="preset-domain">arxiv.org</span>
-                                <span class="preset-name">ArXiv Distributed Systems</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Seed Submission Status Feedback -->
-                    <div id="seed-feedback-banner" class="feedback-banner hidden"></div>
-                </div>
-
-                <!-- Tab 3: Domain Metrics & TLD Breakdown -->
-                <div class="tab-pane" id="domain-tab">
-                    <div class="seed-section-intro">
-                        <h4 class="section-heading">DOMAIN DISTRIBUTION BREAKDOWN</h4>
-                        <p class="section-subtext">Proportional breakdown of pages indexed across unique hosts traversed by the crawler worker fleet.</p>
-                    </div>
-
-                    <div id="domain-distribution-chart" class="domain-bars-wrapper">
-                        <!-- Populated dynamically -->
-                    </div>
-
-                    <div id="domain-table-container" class="domain-table-wrapper">
+                    <div class="search-results-list" id="search-results-container">
                         <!-- Populated dynamically -->
                     </div>
                 </div>
             </section>
 
-            <!-- Right Column: Infrastructure Telemetry & Worker Fleet -->
-            <aside class="console-panel secondary-console">
-                <!-- Section 1: Worker Nodes -->
-                <div class="telemetry-section">
-                    <div class="section-header-row">
-                        <div class="header-with-badge">
-                            <h4 class="panel-header-title">WORKER FLEET</h4>
-                            <span class="count-badge" id="active-workers-count">0 NODES</span>
-                        </div>
-                        <span class="refresh-indicator" id="worker-pulse-badge">HEARTBEAT OK</span>
-                    </div>
-
-                    <div class="worker-nodes-list" id="workers-container">
-                        <!-- Dynamically filled with worker nodes -->
-                    </div>
-                </div>
-
-                <!-- Section 2: Real-time Crawl Activity Feed -->
-                <div class="telemetry-section live-feed-section">
-                    <div class="section-header-row">
-                        <div class="header-with-badge">
-                            <h4 class="panel-header-title">LIVE CRAWL STREAM</h4>
-                            <span class="feed-pulse-indicator"></span>
-                        </div>
-                        <div class="feed-controls">
-                            <button type="button" id="toggle-stream-btn" class="feed-ctrl-btn" title="Pause or resume live telemetry feed">PAUSE</button>
-                            <button type="button" id="clear-stream-btn" class="feed-ctrl-btn" title="Clear log stream buffer">CLEAR</button>
+            <!-- VIEW 5: DOMAINS -->
+            <section class="view-panel" id="view-domains">
+                <div class="card-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <h3 class="panel-heading">DOMAIN DISTRIBUTION & REGISTRY</h3>
+                            <p class="panel-caption">Unique hosts traversed, total pages indexed, and average latency</p>
                         </div>
                     </div>
 
-                    <div class="terminal-log-feed" id="terminal-feed">
-                        <!-- Dynamically populated with live activity events -->
+                    <div class="domains-metrics-container">
+                        <div class="domain-bars-wrapper" id="domains-bars-view">
+                            <!-- Populated dynamically -->
+                        </div>
                     </div>
                 </div>
-            </aside>
-        </main>
+            </section>
 
-        <!-- App Footer -->
-        <footer class="app-footer">
-            <div class="footer-left">
-                <span class="footer-text">Distributed Web Crawler • Go Master + Worker Architecture</span>
-                <span class="footer-sep">•</span>
-                <a href="https://github.com/Pushpit1/distributed-crawler" target="_blank" rel="noopener" class="footer-link">GitHub Repository</a>
-            </div>
-            <div class="footer-right">
-                <span class="footer-text" id="footer-connection-status">Ready</span>
-            </div>
-        </footer>
-    </div>
+            <!-- VIEW 6: WORKER FLEET -->
+            <section class="view-panel" id="view-workers">
+                <div class="card-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <h3 class="panel-heading">DISTRIBUTED WORKER FLEET MONITOR</h3>
+                            <p class="panel-caption">Autonomous worker nodes reporting periodic heartbeats and task latency</p>
+                        </div>
+                        <span class="refresh-badge" id="workers-live-pulse">LIVE TELEMETRY</span>
+                    </div>
 
-    <!-- Modal: Wipe & Reset Confirmation -->
-    <div id="reset-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
-        <div class="modal-dialog">
-            <div class="modal-header">
-                <div class="modal-icon-badge danger-badge">⚠️</div>
-                <h3 id="reset-modal-title" class="modal-title">PURGE CRAWLER ENGINE?</h3>
-            </div>
-            <div class="modal-body">
-                <p>This action will permanently flush the <strong>Redis crawl frontier queue</strong>, truncate the <strong>PostgreSQL crawled pages & domains tables</strong>, and re-seed the default start URL (<code>https://go.dev</code>).</p>
-                <div class="warning-callout">
-                    <span>This operation resets the cluster state to a clean slate.</span>
+                    <div class="workers-detailed-grid" id="workers-grid-container">
+                        <!-- Populated dynamically -->
+                    </div>
                 </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" id="cancel-reset-btn" class="modal-btn secondary-modal-btn">CANCEL</button>
-                <button type="button" id="confirm-reset-btn" class="modal-btn danger-modal-btn">CONFIRM WIPE & RESET</button>
-            </div>
+            </section>
+
+            <!-- VIEW 7: ACTIVITY LOGS -->
+            <section class="view-panel" id="view-activity">
+                <div class="card-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <h3 class="panel-heading">AUDITABLE ACTIVITY EVENT STREAM</h3>
+                            <p class="panel-caption">Terminal telemetry feed recording crawler dispatches, status codes, and task leases</p>
+                        </div>
+                        <div class="feed-btn-group">
+                            <button type="button" id="feed-pause-btn" class="telemetry-btn secondary-btn">PAUSE</button>
+                            <button type="button" id="feed-clear-btn" class="telemetry-btn secondary-btn">CLEAR VIEW</button>
+                        </div>
+                    </div>
+
+                    <div class="terminal-feed-box" id="activity-terminal-feed">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 8: ANALYTICS -->
+            <section class="view-panel" id="view-analytics">
+                <div class="card-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <h3 class="panel-heading">SYSTEM PERFORMANCE & LATENCY METRICS</h3>
+                            <p class="panel-caption">Aggregated telemetry over crawl throughput, latency distribution, and error ratios</p>
+                        </div>
+                    </div>
+
+                    <div class="analytics-cards-grid">
+                        <div class="stat-box">
+                            <span class="stat-label">AVERAGE CRAWL LATENCY</span>
+                            <span class="stat-num text-cyan" id="an-avg-latency">184 ms</span>
+                            <span class="stat-caption">HTTP network & parse duration</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label">SUCCESSFUL (200 OK) RATIO</span>
+                            <span class="stat-num text-emerald" id="an-success-rate">98.2%</span>
+                            <span class="stat-caption">Against total HTTP requests</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label">ROBOTS.TXT COMPLIANCE</span>
+                            <span class="stat-num text-amber" id="an-robots-rate">100%</span>
+                            <span class="stat-caption">Zero policy violations</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label">TASK LEASE RECOVERY</span>
+                            <span class="stat-num text-purple" id="an-lease-reclaims">0 tasks</span>
+                            <span class="stat-caption">60s visibility timeout</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 9: SETTINGS & TIERED RESETS -->
+            <section class="view-panel" id="view-settings">
+                <div class="card-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <h3 class="panel-heading">CLUSTER CONFIGURATION & DATA GOVERNANCE</h3>
+                            <p class="panel-caption">Configure backend endpoint connection and execute multi-tier resets</p>
+                        </div>
+                    </div>
+
+                    <!-- Backend URL Config -->
+                    <div class="settings-block">
+                        <h4 class="settings-block-title">BACKEND API CONNECTION</h4>
+                        <div class="form-row">
+                            <input type="text" id="backend-url-input" class="form-input flex-1" placeholder="/api">
+                            <button type="button" id="save-backend-url-btn" class="telemetry-btn primary-btn">CONNECT</button>
+                        </div>
+                        <span class="form-hint">Default <code>/api</code> works for both local Go master and Vercel serverless. Set <code>http://localhost:8080</code> for direct Go master.</span>
+                    </div>
+
+                    <!-- Tiered Resets Console -->
+                    <div class="settings-block">
+                        <h4 class="settings-block-title text-rose">TIERED DATA MANAGEMENT & RESETS</h4>
+                        <p class="settings-desc">Choose the appropriate reset level. Irreversible operations require explicit confirmation phrases.</p>
+
+                        <div class="reset-tier-list">
+                            <div class="tier-card">
+                                <div>
+                                    <h5 class="tier-name">LEVEL A: CLEAR LOCAL UI STATE</h5>
+                                    <p class="tier-desc">Clears local search filters and browser cache. Preserves backend database and queue.</p>
+                                </div>
+                                <button type="button" class="telemetry-btn secondary-btn" id="btn-reset-ui">CLEAR UI</button>
+                            </div>
+
+                            <div class="tier-card">
+                                <div>
+                                    <h5 class="tier-name">LEVEL B: PURGE FRONTIER QUEUE</h5>
+                                    <p class="tier-desc">Flushes pending Redis crawl tasks and leases. Preserves all indexed pages and domains.</p>
+                                </div>
+                                <button type="button" class="telemetry-btn secondary-btn" id="btn-reset-queue">FLUSH QUEUE</button>
+                            </div>
+
+                            <div class="tier-card">
+                                <div>
+                                    <h5 class="tier-name">LEVEL C: PURGE CRAWLED PAGES DATA</h5>
+                                    <p class="tier-desc">Truncates <code>crawled_pages</code> and domain stats. Preserves worker registrations and crawl jobs.</p>
+                                </div>
+                                <button type="button" class="telemetry-btn danger-btn" id="btn-reset-data">PURGE DATA</button>
+                            </div>
+
+                            <div class="tier-card tier-danger-zone">
+                                <div>
+                                    <h5 class="tier-name text-rose">LEVEL D: FULL PRODUCTION RESET</h5>
+                                    <p class="tier-desc">Completely purges database, Redis frontier, events, and re-seeds starter URL. Requires typing confirmation phrase.</p>
+                                </div>
+                                <button type="button" class="telemetry-btn danger-btn" id="btn-reset-prod">PRODUCTION RESET</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VIEW 10: DOCUMENTATION -->
+            <section class="view-panel" id="view-docs">
+                <div class="card-panel">
+                    <div class="panel-header">
+                        <div class="panel-title-group">
+                            <h3 class="panel-heading">SYSTEM ARCHITECTURE & API REFERENCE</h3>
+                            <p class="panel-caption">Technical overview of distributed components, task leasing, and REST endpoints</p>
+                        </div>
+                    </div>
+
+                    <div class="docs-content">
+                        <h4>Distributed Architecture Overview</h4>
+                        <p>The platform separates coordination, persistence, and network fetching into discrete components:</p>
+                        <ul>
+                            <li><strong>Coordinator Master:</strong> HTTP API handling job submissions, domain politeness delays, task leases, and search queries.</li>
+                            <li><strong>Redis Frontier:</strong> High-throughput FIFO queue (`LPUSH`/`RPOP`) with atomic deduplication (`SADD`) and in-flight visibility leases (`HSET`/`HDEL`).</li>
+                            <li><strong>PostgreSQL Index:</strong> Relational storage storing pages, canonical URLs, HTML headers, and GIN-indexed Full-Text vectors (`tsvector`).</li>
+                            <li><strong>Distributed Workers:</strong> Autonomous Go daemons with SSRF defense, `robots.txt` caching, and automatic heartbeats.</li>
+                        </ul>
+
+                        <h4 style="margin-top: 24px;">REST API Reference</h4>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>METHOD</th>
+                                    <th>ENDPOINT</th>
+                                    <th>DESCRIPTION</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td><code>GET</code></td><td><code>/health</code></td><td>Coordinator health probe</td></tr>
+                                <tr><td><code>GET</code></td><td><code>/ready</code></td><td>Database and Redis readiness verification</td></tr>
+                                <tr><td><code>GET</code></td><td><code>/api/status</code></td><td>Full cluster status & telemetry metrics</td></tr>
+                                <tr><td><code>GET</code></td><td><code>/api/metrics</code></td><td>Prometheus-compatible machine metrics</td></tr>
+                                <tr><td><code>GET</code></td><td><code>/api/workers</code></td><td>List registered worker fleet and statuses</td></tr>
+                                <tr><td><code>POST</code></td><td><code>/api/heartbeat</code></td><td>Worker node heartbeat reporting</td></tr>
+                                <tr><td><code>POST</code></td><td><code>/api/submit</code></td><td>Submit seed URLs and launch crawl job</td></tr>
+                                <tr><td><code>GET</code></td><td><code>/api/jobs</code></td><td>List historical crawl jobs</td></tr>
+                                <tr><td><code>GET</code></td><td><code>/api/search</code></td><td>PostgreSQL Full-Text Search with ranking</td></tr>
+                                <tr><td><code>POST</code></td><td><code>/api/reset</code></td><td>Tiered cluster reset (ui, queue, data, production)</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
         </div>
     </div>
 
-    <!-- Modal: Backend Connection Settings -->
-    <div id="settings-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <!-- Modal: Production Reset Confirmation -->
+    <div id="prod-reset-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
         <div class="modal-dialog">
             <div class="modal-header">
-                <div class="modal-icon-badge">⚙️</div>
-                <h3 id="settings-modal-title" class="modal-title">CLUSTER BACKEND CONFIG</h3>
+                <span class="modal-badge text-rose">⚠️ DANGER</span>
+                <h3 class="modal-title">CONFIRM FULL PRODUCTION RESET</h3>
             </div>
             <div class="modal-body">
-                <p>Select which backend endpoint the dashboard connects to. You can target the Vercel Edge Serverless functions, a local Docker Go coordinator, or a remote production cluster.</p>
-                
-                <form id="settings-form" class="settings-form">
-                    <label class="field-label" for="custom-api-input">API BASE URL</label>
-                    <input 
-                        type="text" 
-                        id="custom-api-input" 
-                        placeholder="/api (Default Vercel Edge)" 
-                        autocomplete="off"
-                    >
-                    <div class="preset-urls-group">
-                        <button type="button" class="url-preset-pill" data-url="/api">/api (Vercel Serverless)</button>
-                        <button type="button" class="url-preset-pill" data-url="http://localhost:8080">http://localhost:8080 (Go Master)</button>
-                    </div>
-                </form>
+                <p>This action is irreversible. It will wipe all crawled pages, domain stats, discovered links, and flush the Redis frontier queue.</p>
+                <div class="modal-field-block">
+                    <label class="form-label">Type <code>WIPE ALL DATA</code> to confirm:</label>
+                    <input type="text" id="prod-reset-phrase-input" class="form-input" placeholder="WIPE ALL DATA" autocomplete="off">
+                </div>
             </div>
             <div class="modal-footer">
-                <button type="button" id="close-settings-btn" class="modal-btn secondary-modal-btn">CANCEL</button>
-                <button type="button" id="save-settings-btn" class="modal-btn primary-modal-btn">APPLY & RECONNECT</button>
+                <button type="button" id="cancel-prod-reset-btn" class="telemetry-btn secondary-btn">CANCEL</button>
+                <button type="button" id="confirm-prod-reset-btn" class="telemetry-btn danger-btn" disabled>CONFIRM WIPE</button>
             </div>
         </div>
     </div>
 
     <!-- Modal: Page Detail Inspector -->
-    <div id="page-detail-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div id="page-inspector-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
         <div class="modal-dialog modal-lg">
             <div class="modal-header">
-                <div class="modal-icon-badge">📄</div>
-                <h3 class="modal-title" id="detail-page-title">PAGE METADATA</h3>
-                <button type="button" id="close-detail-btn" class="close-modal-btn">✕</button>
+                <span class="modal-badge text-cyan">INSPECTOR</span>
+                <h3 class="modal-title" id="inspector-modal-title">CRAWLED PAGE DETAILS</h3>
+                <button type="button" class="modal-close-cross" id="close-inspector-btn">✕</button>
             </div>
-            <div class="modal-body" id="detail-page-content">
-                <!-- Dynamically populated -->
+            <div class="modal-body" id="inspector-modal-body">
+                <!-- Populated dynamically -->
             </div>
         </div>
     </div>

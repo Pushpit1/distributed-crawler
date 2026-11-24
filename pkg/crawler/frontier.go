@@ -5,16 +5,19 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-// Frontier manages the crawl queue (FIFO) and visited deduplication set in Redis.
+// Frontier manages the crawl queue (FIFO), visited deduplication set, and task leases in Redis.
 type Frontier struct {
 	rdb      *redis.Client
 	queueKey string // Redis List key for pending URLs (e.g. "crawler:queue")
 	setKey   string // Redis Set key for visited URLs (e.g. "crawler:visited")
+	leaseKey string // Redis Hash key for in-flight task leases (e.g. "crawler:leases")
 }
 
 // NewFrontier initializes a new Redis-backed URL Frontier.
@@ -23,6 +26,7 @@ func NewFrontier(rdb *redis.Client, queueKey, setKey string) *Frontier {
 		rdb:      rdb,
 		queueKey: queueKey,
 		setKey:   setKey,
+		leaseKey: queueKey + ":leases",
 	}
 }
 
@@ -32,24 +36,20 @@ func (f *Frontier) Submit(ctx context.Context, urls ...string) (int, error) {
 	newCount := 0
 
 	for _, rawURL := range urls {
-		if rawURL == "" {
+		trimmed := strings.TrimSpace(rawURL)
+		if trimmed == "" {
 			continue
 		}
 
-		// SADD adds elements to the visited set.
-		// Returns 1 if the element is new and was added.
-		// Returns 0 if the element already existed in the set.
-		// This is an atomic operation performed in-memory by Redis.
-		added, err := f.rdb.SAdd(ctx, f.setKey, rawURL).Result()
+		added, err := f.rdb.SAdd(ctx, f.setKey, trimmed).Result()
 		if err != nil {
-			return newCount, fmt.Errorf("failed SADD check for URL %s: %w", rawURL, err)
+			return newCount, fmt.Errorf("failed SADD check for URL %s: %w", trimmed, err)
 		}
 
 		if added == 1 {
-			// The URL is unique! Push it to our FIFO queue (Left Push)
-			err := f.rdb.LPush(ctx, f.queueKey, rawURL).Err()
+			err := f.rdb.LPush(ctx, f.queueKey, trimmed).Err()
 			if err != nil {
-				return newCount, fmt.Errorf("failed LPUSH for URL %s: %w", rawURL, err)
+				return newCount, fmt.Errorf("failed LPUSH for URL %s: %w", trimmed, err)
 			}
 			newCount++
 		}
@@ -59,12 +59,9 @@ func (f *Frontier) Submit(ctx context.Context, urls ...string) (int, error) {
 }
 
 // GetNext pulls the next URL from the frontier queue (Right Pop).
-// Returns an empty string if the queue is empty.
 func (f *Frontier) GetNext(ctx context.Context) (string, error) {
-	// RPOP removes and returns the last element of the list.
 	val, err := f.rdb.RPop(ctx, f.queueKey).Result()
 	if err == redis.Nil {
-		// Redis returns redis.Nil when the key does not exist or list is empty
 		return "", nil
 	} else if err != nil {
 		return "", fmt.Errorf("failed RPOP from queue: %w", err)
@@ -74,34 +71,29 @@ func (f *Frontier) GetNext(ctx context.Context) (string, error) {
 }
 
 // GetPoliteTask retrieves the next crawl task, enforcing a politeness rate-limit delay per domain.
-// It checks if the host was crawled too recently. If it was, the URL is re-queued,
-// and it tries to find another URL from a different domain.
 func (f *Frontier) GetPoliteTask(ctx context.Context, politenessDelay time.Duration) (string, error) {
-	// We will inspect up to 10 URLs in the queue to find one that is not rate-limited.
-	// This prevents infinite loops if the queue contains only rate-limited domains.
+	return f.GetPoliteTaskWithLease(ctx, politenessDelay, "anonymous-worker")
+}
+
+// GetPoliteTaskWithLease retrieves the next crawl task and records an in-flight visibility lease.
+func (f *Frontier) GetPoliteTaskWithLease(ctx context.Context, politenessDelay time.Duration, workerID string) (string, error) {
 	maxAttempts := 10
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		// Pop the next URL from the queue
 		uStr, err := f.GetNext(ctx)
 		if err != nil {
 			return "", err
 		}
 		if uStr == "" {
-			return "", nil // Queue is empty
+			return "", nil
 		}
 
 		parsed, err := url.Parse(uStr)
-		if err != nil {
-			// If URL is corrupt, ignore it and continue
+		if err != nil || parsed.Host == "" {
 			continue
 		}
-		host := parsed.Host
-		if host == "" {
-			continue
-		}
+		host := strings.ToLower(parsed.Host)
 
-		// Check if this host is currently rate-limited in Redis
 		rateLimitKey := fmt.Sprintf("rate_limit:host:%s", host)
 		isLimited, err := f.rdb.Exists(ctx, rateLimitKey).Result()
 		if err != nil {
@@ -109,28 +101,62 @@ func (f *Frontier) GetPoliteTask(ctx context.Context, politenessDelay time.Durat
 		}
 
 		if isLimited == 1 {
-			// Host is rate-limited! Re-enqueue this URL to the back (left) of the queue.
-			// This gives it another chance later while allowing other domains to be processed.
-			err := f.rdb.LPush(ctx, f.queueKey, uStr).Err()
-			if err != nil {
-				return "", fmt.Errorf("failed to re-enqueue rate-limited URL: %w", err)
-			}
+			// Domain is rate-limited; re-enqueue to back of queue
+			_ = f.rdb.LPush(ctx, f.queueKey, uStr).Err()
 			continue
 		}
 
-		// Host is NOT rate-limited!
-		// Set the rate-limit flag in Redis with a TTL of our politeness delay if it is greater than 0.
 		if politenessDelay > 0 {
-			err = f.rdb.Set(ctx, rateLimitKey, "1", politenessDelay).Err()
-			if err != nil {
-				return "", fmt.Errorf("failed to set rate limit in Redis: %w", err)
-			}
+			_ = f.rdb.Set(ctx, rateLimitKey, "1", politenessDelay).Err()
 		}
+
+		// Record task lease: stores workerID and lease start timestamp
+		leaseVal := fmt.Sprintf("%s:%d", workerID, time.Now().Unix())
+		_ = f.rdb.HSet(ctx, f.leaseKey, uStr, leaseVal).Err()
 
 		return uStr, nil
 	}
 
-	return "", nil // All inspected items were rate-limited
+	return "", nil
+}
+
+// AckTask acknowledges task completion and releases the in-flight lease.
+func (f *Frontier) AckTask(ctx context.Context, taskURL string) error {
+	return f.rdb.HDel(ctx, f.leaseKey, taskURL).Err()
+}
+
+// ReclaimExpiredLeases scans active leases and re-enqueues tasks whose lease duration exceeds timeout.
+func (f *Frontier) ReclaimExpiredLeases(ctx context.Context, timeout time.Duration) (int, error) {
+	leases, err := f.rdb.HGetAll(ctx, f.leaseKey).Result()
+	if err != nil {
+		return 0, err
+	}
+
+	now := time.Now().Unix()
+	timeoutSec := int64(timeout.Seconds())
+	reclaimed := 0
+
+	for taskURL, val := range leases {
+		parts := strings.Split(val, ":")
+		if len(parts) < 2 {
+			continue
+		}
+
+		ts, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			continue
+		}
+
+		if (now - ts) > timeoutSec {
+			// Lease expired! Reclaim task by pushing back into FIFO queue
+			_ = f.rdb.LPush(ctx, f.queueKey, taskURL).Err()
+			_ = f.rdb.HDel(ctx, f.leaseKey, taskURL).Err()
+			reclaimed++
+			log.Printf("♻️ Reclaimed abandoned task lease for %s (worker: %s)\n", taskURL, parts[0])
+		}
+	}
+
+	return reclaimed, nil
 }
 
 // QueueSize returns the current number of pending URLs in the crawl queue.
@@ -151,12 +177,12 @@ func (f *Frontier) VisitedCount(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-// Clear flushes both the queue and visited set keys in Redis (useful for resets).
+// Clear flushes the queue, visited set, and task leases in Redis.
 func (f *Frontier) Clear(ctx context.Context) error {
-	err := f.rdb.Del(ctx, f.queueKey, f.setKey).Err()
+	err := f.rdb.Del(ctx, f.queueKey, f.setKey, f.leaseKey).Err()
 	if err != nil {
 		return fmt.Errorf("failed to clear frontier keys: %w", err)
 	}
-	log.Println("🧹 Frontier queue and deduplication set cleared successfully.")
+	log.Println("🧹 Frontier queue, leases, and deduplication set cleared successfully.")
 	return nil
 }

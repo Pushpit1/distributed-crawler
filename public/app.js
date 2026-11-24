@@ -1,811 +1,1266 @@
 /**
- * GOPHER CRAWLER — WEB APPLICATION SCRIPT
- * Production Grade Telemetry Console & Distributed Controller
+ * GOPHER CRAWLER — WEB APPLICATION CONTROLLER (v1.2.0)
+ * Production-Inspired Distributed Web Crawling, Indexing & Telemetry Console
+ * Strictly verified data, reactive telemetry polling, and tiered governance.
  */
 
-document.addEventListener('DOMContentLoaded', () => {
-    // =========================================================================
-    // 1. API Configuration & Auto-Detection
-    // =========================================================================
-    const DEFAULT_API = "/api";
+(() => {
+    'use strict';
 
-    function getApiBase() {
-        const stored = localStorage.getItem("crawler_api_base");
-        if (stored) return stored.replace(/\/+$/, "");
-        return DEFAULT_API;
+    // =========================================================================
+    // 1. STATE & CONFIGURATION
+    // =========================================================================
+    const DEFAULT_API = '/api';
+    const state = {
+        apiBase: localStorage.getItem('crawler_api_base') || DEFAULT_API,
+        currentView: 'view-overview',
+        autoCrawlActive: false,
+        autoCrawlTimer: null,
+        telemetryTimer: null,
+        feedPaused: false,
+        activeSearchFilter: '0',
+        activeJobFilter: 'ALL',
+        latestStatus: null,
+        cachedPages: [],
+        cachedJobs: [],
+        cachedWorkers: [],
+        cachedDomains: [],
+        cachedEvents: []
+    };
+
+    // =========================================================================
+    // 2. DOM ELEMENT REFERENCES
+    // =========================================================================
+    const DOM = {
+        // Navigation & Header
+        navItems: document.querySelectorAll('.nav-item[data-view]'),
+        viewPanels: document.querySelectorAll('.view-panel'),
+        breadcrumbTitle: document.getElementById('breadcrumb-title'),
+        sidebarStatusBox: document.getElementById('sidebar-status-box'),
+        globalPulseDot: document.getElementById('global-pulse-dot'),
+        globalStatusText: document.getElementById('global-status-text'),
+        globalModeTag: document.getElementById('global-mode-tag'),
+        sidebarJobCount: document.getElementById('sidebar-job-count'),
+        sidebarWorkerCount: document.getElementById('sidebar-worker-count'),
+        autoCrawlToggle: document.getElementById('auto-crawl-toggle'),
+        crawlStepBtn: document.getElementById('crawl-step-btn'),
+        quickResetBtn: document.getElementById('quick-reset-btn'),
+
+        // Overview View
+        ovPagesCount: document.getElementById('ov-pages-count'),
+        ovPagesSub: document.getElementById('ov-pages-sub'),
+        ovDomainsCount: document.getElementById('ov-domains-count'),
+        ovDomainsSub: document.getElementById('ov-domains-sub'),
+        ovQueueCount: document.getElementById('ov-queue-count'),
+        ovQueueSub: document.getElementById('ov-queue-sub'),
+        ovWorkersCount: document.getElementById('ov-workers-count'),
+        ovWorkersSub: document.getElementById('ov-workers-sub'),
+        ovRecentPages: document.getElementById('ov-recent-pages'),
+        ovWorkersList: document.getElementById('ov-workers-list'),
+        ovUptimeVal: document.getElementById('ov-uptime-val'),
+
+        // Crawl Explorer View
+        crawlExplorerForm: document.getElementById('crawl-explorer-form'),
+        explorerUrlInput: document.getElementById('explorer-url-input'),
+        explorerDepthInput: document.getElementById('explorer-depth-input'),
+        explorerPagesInput: document.getElementById('explorer-pages-input'),
+        explorerPolitenessInput: document.getElementById('explorer-politeness-input'),
+        presetPills: document.querySelectorAll('.preset-pill'),
+        explorerFeedback: document.getElementById('explorer-feedback'),
+        explorerSubmitBtn: document.getElementById('explorer-submit-btn'),
+
+        // Jobs View
+        jobStatusFilters: document.getElementById('job-status-filters'),
+        jobsTbody: document.getElementById('jobs-tbody'),
+
+        // Search Index View
+        searchIndexForm: document.getElementById('search-index-form'),
+        searchMainInput: document.getElementById('search-main-input'),
+        searchClearBtn: document.getElementById('search-clear-btn'),
+        searchChips: document.querySelectorAll('.chip-item[data-filter]'),
+        searchTallyText: document.getElementById('search-tally-text'),
+        searchResultsContainer: document.getElementById('search-results-container'),
+
+        // Domains View
+        domainsBarsView: document.getElementById('domains-bars-view'),
+
+        // Workers View
+        workersGridContainer: document.getElementById('workers-grid-container'),
+        workersLivePulse: document.getElementById('workers-live-pulse'),
+
+        // Activity Feed View
+        activityTerminalFeed: document.getElementById('activity-terminal-feed'),
+        feedPauseBtn: document.getElementById('feed-pause-btn'),
+        feedClearBtn: document.getElementById('feed-clear-btn'),
+
+        // Analytics View
+        anAvgLatency: document.getElementById('an-avg-latency'),
+        anSuccessRate: document.getElementById('an-success-rate'),
+        anRobotsRate: document.getElementById('an-robots-rate'),
+        anLeaseReclaims: document.getElementById('an-lease-reclaims'),
+
+        // Settings View
+        backendUrlInput: document.getElementById('backend-url-input'),
+        saveBackendUrlBtn: document.getElementById('save-backend-url-btn'),
+        btnResetUi: document.getElementById('btn-reset-ui'),
+        btnResetQueue: document.getElementById('btn-reset-queue'),
+        btnResetData: document.getElementById('btn-reset-data'),
+        btnResetProd: document.getElementById('btn-reset-prod'),
+
+        // Production Reset Modal
+        prodResetModal: document.getElementById('prod-reset-modal'),
+        prodResetPhraseInput: document.getElementById('prod-reset-phrase-input'),
+        cancelProdResetBtn: document.getElementById('cancel-prod-reset-btn'),
+        confirmProdResetBtn: document.getElementById('confirm-prod-reset-btn'),
+
+        // Page Inspector Modal
+        pageInspectorModal: document.getElementById('page-inspector-modal'),
+        inspectorModalTitle: document.getElementById('inspector-modal-title'),
+        inspectorModalBody: document.getElementById('inspector-modal-body'),
+        closeInspectorBtn: document.getElementById('close-inspector-btn')
+    };
+
+    // =========================================================================
+    // 3. UTILITY FUNCTIONS
+    // =========================================================================
+    function getApiUrl(path) {
+        const base = state.apiBase.replace(/\/+$/, '');
+        const cleanPath = path.startsWith('/') ? path : `/${path}`;
+        return `${base}${cleanPath}`;
     }
 
-    function setApiBase(url) {
-        if (!url || url.trim() === "" || url === "/api") {
-            localStorage.removeItem("crawler_api_base");
-        } else {
-            localStorage.setItem("crawler_api_base", url.trim().replace(/\/+$/, ""));
-        }
-        updateConnectionStatus();
-        updateDashboard();
-    }
-
-    // =========================================================================
-    // 2. DOM Elements
-    // =========================================================================
-    // Nav & Status
-    const statusPill = document.getElementById('system-status-pill');
-    const statusLabelText = document.getElementById('status-label-text');
-    const statusModeTag = document.getElementById('status-mode-tag');
-    const autoCrawlToggle = document.getElementById('auto-crawl-toggle');
-    const crawlStepBtn = document.getElementById('crawl-step-btn');
-    const openResetBtn = document.getElementById('open-reset-btn');
-    const openSettingsBtn = document.getElementById('open-settings-btn');
-    const footerConnectionStatus = document.getElementById('footer-connection-status');
-
-    // Metrics
-    const metricPages = document.getElementById('metric-pages');
-    const metricPagesTrend = document.getElementById('metric-pages-trend');
-    const metricDomains = document.getElementById('metric-domains');
-    const metricDomainsTrend = document.getElementById('metric-domains-trend');
-    const metricQueue = document.getElementById('metric-queue');
-    const metricQueueTrend = document.getElementById('metric-queue-trend');
-    const metricUptime = document.getElementById('metric-uptime');
-    const metricBackendTag = document.getElementById('metric-backend-tag');
-
-    // Tabs
-    const tabButtons = document.querySelectorAll('.tab-btn');
-    const tabPanes = document.querySelectorAll('.tab-pane');
-
-    // Search Tab
-    const searchForm = document.getElementById('search-form');
-    const searchInput = document.getElementById('search-input');
-    const clearSearchBtn = document.getElementById('clear-search-btn');
-    const filterChips = document.querySelectorAll('.chip-btn');
-    const countAll = document.getElementById('count-all');
-    const count200 = document.getElementById('count-200');
-    const countErr = document.getElementById('count-err');
-    const resultsMetaText = document.getElementById('results-meta-text');
-    const resultsLoading = document.getElementById('results-loading');
-    const resultsEmpty = document.getElementById('results-empty');
-    const resultsList = document.getElementById('results-list');
-
-    // Seed Tab
-    const seedForm = document.getElementById('seed-form');
-    const seedInput = document.getElementById('seed-input');
-    const submitSeedBtn = document.getElementById('submit-seed-btn');
-    const presetCards = document.querySelectorAll('.preset-card');
-    const seedFeedbackBanner = document.getElementById('seed-feedback-banner');
-
-    // Domain Tab
-    const domainDistributionChart = document.getElementById('domain-distribution-chart');
-    const domainTableContainer = document.getElementById('domain-table-container');
-
-    // Infrastructure Panel
-    const activeWorkersCount = document.getElementById('active-workers-count');
-    const workersContainer = document.getElementById('workers-container');
-    const terminalFeed = document.getElementById('terminal-feed');
-    const toggleStreamBtn = document.getElementById('toggle-stream-btn');
-    const clearStreamBtn = document.getElementById('clear-stream-btn');
-
-    // Modals
-    const resetModal = document.getElementById('reset-modal');
-    const cancelResetBtn = document.getElementById('cancel-reset-btn');
-    const confirmResetBtn = document.getElementById('confirm-reset-btn');
-
-    const settingsModal = document.getElementById('settings-modal');
-    const customApiInput = document.getElementById('custom-api-input');
-    const closeSettingsBtn = document.getElementById('close-settings-btn');
-    const saveSettingsBtn = document.getElementById('save-settings-btn');
-    const urlPresetPills = document.querySelectorAll('.url-preset-pill');
-
-    const pageDetailModal = document.getElementById('page-detail-modal');
-    const detailPageTitle = document.getElementById('detail-page-title');
-    const detailPageContent = document.getElementById('detail-page-content');
-    const closeDetailBtn = document.getElementById('close-detail-btn');
-
-    // =========================================================================
-    // 3. Application State
-    // =========================================================================
-    let cachedPages = [];
-    let currentFilter = 'all';
-    let currentSearchQuery = '';
-    let isStreamPaused = false;
-    let autoCrawlTimer = null;
-    let isReconnecting = false;
-    let lastKnownUptime = 0;
-
-    // =========================================================================
-    // 4. API Request Wrapper with Graceful Fallbacks
-    // =========================================================================
-    async function apiFetch(endpoint, options = {}) {
-        const base = getApiBase();
-        const url = `${base}${endpoint}`;
-
+    async function apiRequest(endpoint, options = {}) {
+        const url = getApiUrl(endpoint);
         try {
             const res = await fetch(url, {
                 ...options,
                 headers: {
+                    'Accept': 'application/json',
                     'Content-Type': 'application/json',
                     ...(options.headers || {})
                 }
             });
 
             if (!res.ok) {
-                // If relative /api returned 404 or failed and we haven't set an explicit custom URL,
-                // try fallback to direct local Go master at port 8080
-                if (base === "/api" && res.status === 404) {
-                    const fallbackUrl = `http://localhost:8080${endpoint}`;
-                    const fbRes = await fetch(fallbackUrl, options);
-                    if (fbRes.ok) return await fbRes.json();
+                let errDetail = res.statusText;
+                try {
+                    const errJson = await res.json();
+                    if (errJson.error) errDetail = errJson.error;
+                } catch {
+                    // Fall back to statusText
                 }
-                throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                throw new Error(`${errDetail} (${res.status})`);
             }
 
             return await res.json();
         } catch (err) {
-            // Auto-fallback check if running locally
-            if (base === "/api" && window.location.hostname === "localhost") {
-                try {
-                    const fallbackUrl = `http://localhost:8080${endpoint}`;
-                    const fbRes = await fetch(fallbackUrl, options);
-                    if (fbRes.ok) return await fbRes.json();
-                } catch {
-                    // Fall through to throw original error
-                }
-            }
+            console.warn(`[API] Error calling ${endpoint}:`, err);
             throw err;
         }
     }
 
-    function updateConnectionStatus(isOnline = true, mode = null) {
-        const base = getApiBase();
-        if (isOnline) {
-            statusPill.className = "system-status-indicator";
-            statusLabelText.textContent = "SYS: NOMINAL";
-            statusModeTag.textContent = mode ? `[${mode.toUpperCase()}]` : `[${base === "/api" ? "EDGE" : "CLUSTER"}]`;
-            footerConnectionStatus.textContent = `Connected: ${base}`;
-            footerConnectionStatus.className = "footer-text text-emerald";
-            isReconnecting = false;
-        } else {
-            statusPill.className = "system-status-indicator status-offline";
-            statusLabelText.textContent = "SYS: RECONNECTING";
-            statusModeTag.textContent = "[OFFLINE]";
-            footerConnectionStatus.textContent = `Disconnected (${base})`;
-            footerConnectionStatus.className = "footer-text text-rose";
-            isReconnecting = true;
-        }
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
-    // =========================================================================
-    // 5. Dashboard Telemetry Updates
-    // =========================================================================
-    async function updateDashboard() {
-        try {
-            const data = await apiFetch('/status');
-            updateConnectionStatus(true, data.mode);
-
-            // 1. Metric Counters
-            metricPages.textContent = Number(data.visited_count || 0).toLocaleString();
-            metricDomains.textContent = Number(data.domain_count || 0).toLocaleString();
-            metricQueue.textContent = Number(data.queue_size || 0).toLocaleString();
-
-            if (data.uptime_sec !== undefined) {
-                lastKnownUptime = data.uptime_sec;
-                metricUptime.textContent = formatUptime(data.uptime_sec);
-            }
-
-            if (data.mode === "proxy") {
-                metricBackendTag.textContent = `Go Cluster Proxy`;
-                metricBackendTag.className = "metric-trend text-cyan";
-            } else {
-                metricBackendTag.textContent = `Vercel Serverless Edge`;
-                metricBackendTag.className = "metric-trend text-muted";
-            }
-
-            metricPagesTrend.textContent = `${data.queue_size || 0} in frontier`;
-            metricDomainsTrend.textContent = `${data.domain_count || 0} unique hosts`;
-
-            // 2. Worker Fleet
-            renderWorkers(data.workers || []);
-
-            // 3. Live Activity Feed (Terminal)
-            if (!isStreamPaused && data.live_logs) {
-                renderTerminalFeed(data.live_logs);
-            } else if (!isStreamPaused && data.recent_pages) {
-                renderTerminalFeedFromPages(data.recent_pages);
-            }
-
-            // 4. Domain Breakdown
-            if (data.domain_breakdown) {
-                renderDomainDistribution(data.domain_breakdown);
-            }
-
-            // 5. Cache recent pages for search and filters
-            if (data.recent_pages && currentSearchQuery === '') {
-                cachedPages = data.recent_pages;
-                updateFilterCounts();
-                renderResults(cachedPages);
-            }
-
-        } catch (err) {
-            console.warn("Telemetry update warning:", err);
-            updateConnectionStatus(false);
-        }
+    function formatNumber(num) {
+        if (num === null || num === undefined || isNaN(num)) return '0';
+        return Number(num).toLocaleString();
     }
 
-    function formatUptime(seconds) {
-        if (!seconds) return "0s";
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = Math.floor(seconds % 60);
-        if (h > 0) return `${h}h ${m}m`;
-        if (m > 0) return `${m}m ${s}s`;
-        return `${s}s`;
+    function formatBytes(bytes) {
+        if (!bytes || bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
-    // =========================================================================
-    // 6. Workers Rendering
-    // =========================================================================
-    function renderWorkers(workers) {
-        activeWorkersCount.textContent = `${workers.length} ${workers.length === 1 ? 'NODE' : 'NODES'}`;
+    function formatRelativeTime(dateStr) {
+        if (!dateStr) return 'never';
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffSec = Math.floor(diffMs / 1000);
+        if (diffSec < 5) return 'just now';
+        if (diffSec < 60) return `${diffSec}s ago`;
+        const diffMin = Math.floor(diffSec / 60);
+        if (diffMin < 60) return `${diffMin}m ago`;
+        const diffHr = Math.floor(diffMin / 60);
+        if (diffHr < 24) return `${diffHr}h ago`;
+        return date.toLocaleDateString();
+    }
 
-        if (!workers || workers.length === 0) {
-            workersContainer.innerHTML = `
-                <div class="worker-node-item">
-                    <span class="worker-host">No workers actively reporting. Dispatched jobs run on serverless workers.</span>
-                </div>
-            `;
-            return;
+    function showToast(message, type = 'info') {
+        let toastContainer = document.getElementById('platform-toast-container');
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.id = 'platform-toast-container';
+            toastContainer.className = 'toast-container';
+            document.body.appendChild(toastContainer);
         }
 
-        workersContainer.innerHTML = workers.map(w => {
-            const isIdle = w.status === 'idle' || w.last_seen_sec_ago > 4.0;
-            const dotClass = isIdle ? 'node-pulse-dot idle' : 'node-pulse-dot';
-            const statusLabel = isIdle ? 'IDLE' : 'ACTIVE';
-            const ping = (w.last_seen_sec_ago || 0).toFixed(1);
-
-            return `
-                <div class="worker-node-item">
-                    <div class="worker-node-left">
-                        <span class="${dotClass}"></span>
-                        <div>
-                            <div class="worker-id">${escapeHTML(w.id || 'worker-node')}</div>
-                            <div class="worker-host">${escapeHTML(w.hostname || 'cluster-node')}</div>
-                        </div>
-                    </div>
-                    <div class="worker-meta">
-                        <span class="badge ${isIdle ? 'badge-403' : 'badge-200'}">${statusLabel}</span>
-                        <span>${ping}s ago</span>
-                    </div>
-                </div>
-            `;
-        }).join('');
-    }
-
-    // =========================================================================
-    // 7. Live Terminal Feed Rendering
-    // =========================================================================
-    function renderTerminalFeed(logs) {
-        if (!logs || logs.length === 0) {
-            terminalFeed.innerHTML = `<div class="event-url text-muted">Awaiting crawl dispatch...</div>`;
-            return;
-        }
-
-        terminalFeed.innerHTML = logs.map(log => {
-            const statusClass = log.status === 200 ? 'status-200' : (log.status === 403 ? 'status-403' : 'status-500');
-            return `
-                <div class="terminal-event-row">
-                    <span class="event-time">${escapeHTML(log.timestamp || '')}</span>
-                    <span class="event-status ${statusClass}">${log.status}</span>
-                    <span class="event-url" title="${escapeHTML(log.url)}">${escapeHTML(log.url)}</span>
-                    <span class="event-latency">${escapeHTML(log.latency || '')}</span>
-                </div>
-            `;
-        }).join('');
-    }
-
-    function renderTerminalFeedFromPages(pages) {
-        if (!pages || pages.length === 0) return;
-        terminalFeed.innerHTML = pages.map(p => {
-            const status = p.status_code || 200;
-            const statusClass = status === 200 ? 'status-200' : (status === 403 ? 'status-403' : 'status-500');
-            return `
-                <div class="terminal-event-row">
-                    <span class="event-status ${statusClass}">${status}</span>
-                    <span class="event-url" title="${escapeHTML(p.url)}">${escapeHTML(p.url)}</span>
-                    <span class="event-latency">${escapeHTML(p.domain || '')}</span>
-                </div>
-            `;
-        }).join('');
-    }
-
-    // =========================================================================
-    // 8. Domain Distribution Rendering
-    // =========================================================================
-    function renderDomainDistribution(distribution) {
-        if (!distribution || distribution.length === 0) {
-            domainDistributionChart.innerHTML = `<span class="text-muted">No domain data registered yet.</span>`;
-            domainTableContainer.innerHTML = '';
-            return;
-        }
-
-        const maxCount = Math.max(...distribution.map(d => d.count), 1);
-
-        domainDistributionChart.innerHTML = distribution.map(d => {
-            const pct = Math.round((d.count / maxCount) * 100);
-            return `
-                <div class="domain-bar-row">
-                    <div class="domain-bar-meta">
-                        <span class="text-cyan font-mono">${escapeHTML(d.domain)}</span>
-                        <span class="text-muted">${d.count} pages (${pct}%)</span>
-                    </div>
-                    <div class="domain-bar-track">
-                        <div class="domain-bar-fill" style="width: ${pct}%;"></div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        domainTableContainer.innerHTML = `
-            <table class="domain-table">
-                <thead>
-                    <tr>
-                        <th>DOMAIN / HOSTNAME</th>
-                        <th>CRAWLED PAGES</th>
-                        <th>SHARE</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${distribution.map(d => {
-                        const pct = Math.round((d.count / maxCount) * 100);
-                        return `
-                            <tr>
-                                <td class="text-cyan">${escapeHTML(d.domain)}</td>
-                                <td>${d.count}</td>
-                                <td>${pct}%</td>
-                            </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            </table>
+        const toast = document.createElement('div');
+        toast.className = `toast-item toast-${type}`;
+        toast.innerHTML = `
+            <div class="toast-dot"></div>
+            <div class="toast-text">${escapeHtml(message)}</div>
         `;
+        toastContainer.appendChild(toast);
+
+        setTimeout(() => {
+            toast.classList.add('toast-show');
+        }, 10);
+
+        setTimeout(() => {
+            toast.classList.remove('toast-show');
+            setTimeout(() => toast.remove(), 300);
+        }, 4000);
     }
 
     // =========================================================================
-    // 9. Search Execution & Filter Logic
+    // 4. NAVIGATION & VIEW SWITCHING
     // =========================================================================
-    searchForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        performSearch(searchInput.value.trim());
-    });
+    function switchView(viewId) {
+        if (!viewId) return;
 
-    let searchDebounce = null;
-    searchInput.addEventListener('input', () => {
-        const q = searchInput.value.trim();
-        clearSearchBtn.classList.toggle('hidden', q === '');
-        clearTimeout(searchDebounce);
-        searchDebounce = setTimeout(() => {
-            performSearch(q);
-        }, 320);
-    });
+        // Update nav buttons
+        DOM.navItems.forEach(item => {
+            if (item.dataset.view === viewId) {
+                item.classList.add('active');
+            } else {
+                item.classList.remove('active');
+            }
+        });
 
-    clearSearchBtn.addEventListener('click', () => {
-        searchInput.value = '';
-        clearSearchBtn.classList.add('hidden');
-        performSearch('');
-    });
+        // Update view panels
+        DOM.viewPanels.forEach(panel => {
+            if (panel.id === viewId) {
+                panel.classList.add('active');
+            } else {
+                panel.classList.remove('active');
+            }
+        });
 
-    async function performSearch(query) {
-        currentSearchQuery = query;
-        resultsLoading.classList.remove('hidden');
-        resultsEmpty.classList.add('hidden');
-        resultsList.innerHTML = '';
+        state.currentView = viewId;
+        window.location.hash = viewId.replace('view-', '');
 
+        // Update header breadcrumb
+        const titleMap = {
+            'view-overview': 'OVERVIEW',
+            'view-explorer': 'CRAWL EXPLORER',
+            'view-jobs': 'JOBS MANAGER',
+            'view-search': 'SEARCH INDEX',
+            'view-domains': 'DOMAINS REGISTRY',
+            'view-workers': 'WORKER FLEET',
+            'view-activity': 'ACTIVITY LOGS',
+            'view-analytics': 'PERFORMANCE & ANALYTICS',
+            'view-settings': 'SETTINGS & RESETS',
+            'view-docs': 'DOCUMENTATION'
+        };
+        DOM.breadcrumbTitle.textContent = titleMap[viewId] || 'TELEMETRY';
+
+        // Refresh view data on switch
+        refreshCurrentView();
+    }
+
+    function initNavigation() {
+        DOM.navItems.forEach(btn => {
+            btn.addEventListener('click', () => {
+                switchView(btn.dataset.view);
+            });
+        });
+
+        // Quick action link buttons (e.g. "VIEW ALL", "FLEET VIEW")
+        document.querySelectorAll('[data-view-target]').forEach(link => {
+            link.addEventListener('click', () => {
+                switchView(link.getAttribute('data-view-target'));
+            });
+        });
+
+        // Quick reset button in header jumps to settings view
+        if (DOM.quickResetBtn) {
+            DOM.quickResetBtn.addEventListener('click', () => {
+                switchView('view-settings');
+            });
+        }
+
+        // Handle initial hash in URL
+        const hash = window.location.hash.replace('#', '');
+        if (hash) {
+            const target = `view-${hash}`;
+            if (document.getElementById(target)) {
+                switchView(target);
+                return;
+            }
+        }
+        switchView('view-overview');
+    }
+
+    // =========================================================================
+    // 5. TELEMETRY POLLING & STATUS UPDATES
+    // =========================================================================
+    async function fetchSystemStatus() {
         try {
-            const results = await apiFetch(`/search?q=${encodeURIComponent(query)}`);
-            cachedPages = results || [];
-            updateFilterCounts();
-            renderResults(cachedPages);
+            const data = await apiRequest('/status');
+            state.latestStatus = data;
+
+            // Update top badges
+            if (DOM.globalStatusText) {
+                DOM.globalStatusText.textContent = data.status === 'ok' ? 'SYSTEM ONLINE' : 'DEGRADED';
+            }
+            if (DOM.globalModeTag) {
+                const modeLabel = data.operating_mode ? `[${data.operating_mode.toUpperCase()}]` : '[MODE A: CLUSTER]';
+                DOM.globalModeTag.textContent = modeLabel;
+            }
+            if (DOM.globalPulseDot) {
+                DOM.globalPulseDot.className = 'status-indicator-dot online';
+            }
+
+            // Update Overview Metrics
+            if (DOM.ovPagesCount) DOM.ovPagesCount.textContent = formatNumber(data.pages_crawled || 0);
+            if (DOM.ovDomainsCount) DOM.ovDomainsCount.textContent = formatNumber(data.domains_discovered || 0);
+            if (DOM.ovQueueCount) DOM.ovQueueCount.textContent = formatNumber(data.queue_size || 0);
+            if (DOM.ovWorkersCount) DOM.ovWorkersCount.textContent = formatNumber(data.workers_active || (data.workers ? data.workers.length : 0));
+            if (DOM.ovUptimeVal) DOM.ovUptimeVal.textContent = data.uptime || 'active';
+
+            if (DOM.ovQueueSub) {
+                const activeLeases = data.leases_active || 0;
+                DOM.ovQueueSub.textContent = `${activeLeases} lease${activeLeases === 1 ? '' : 's'} active`;
+            }
+
+            // Sidebar counters
+            if (DOM.sidebarWorkerCount) {
+                DOM.sidebarWorkerCount.textContent = data.workers_active || (data.workers ? data.workers.length : 0);
+            }
+
+            // Overview recent pages stream
+            if (data.recent_pages && data.recent_pages.length > 0) {
+                renderRecentPages(data.recent_pages);
+            }
+
+            // Overview workers snapshot
+            if (data.workers) {
+                renderWorkersSnapshot(data.workers);
+            }
+
+            return data;
         } catch (err) {
-            console.error("Search error:", err);
-            resultsList.innerHTML = `
-                <div class="feedback-banner feedback-error">
-                    <span>Search error: ${escapeHTML(err.message)}</span>
+            if (DOM.globalStatusText) DOM.globalStatusText.textContent = 'DISCONNECTED';
+            if (DOM.globalPulseDot) DOM.globalPulseDot.className = 'status-indicator-dot offline';
+            if (DOM.globalModeTag) DOM.globalModeTag.textContent = '[UNREACHABLE]';
+            return null;
+        }
+    }
+
+    function renderRecentPages(pages) {
+        if (!DOM.ovRecentPages) return;
+        DOM.ovRecentPages.innerHTML = pages.map(p => {
+            const statusClass = p.status_code === 200 ? 'status-pill-ok' : 'status-pill-err';
+            return `
+                <div class="recent-page-card" data-url="${escapeHtml(p.url)}">
+                    <div class="card-status-col">
+                        <span class="status-code-badge ${statusClass}">${p.status_code || 200}</span>
+                    </div>
+                    <div class="card-content-col">
+                        <div class="card-title-row">
+                            <h4 class="card-title">${escapeHtml(p.title || p.url)}</h4>
+                            <span class="card-latency font-mono">${p.latency_ms || 0}ms</span>
+                        </div>
+                        <a href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer" class="card-url font-mono">${escapeHtml(p.url)}</a>
+                    </div>
                 </div>
             `;
-        } finally {
-            resultsLoading.classList.add('hidden');
-        }
-    }
+        }).join('');
 
-    function updateFilterCounts() {
-        const total = cachedPages.length;
-        const ok200 = cachedPages.filter(p => p.status_code === 200).length;
-        const errs = cachedPages.filter(p => p.status_code !== 200).length;
-
-        countAll.textContent = total;
-        count200.textContent = ok200;
-        countErr.textContent = errs;
-    }
-
-    filterChips.forEach(chip => {
-        chip.addEventListener('click', () => {
-            filterChips.forEach(c => c.classList.remove('active'));
-            chip.classList.add('active');
-            currentFilter = chip.getAttribute('data-filter');
-            renderResults(cachedPages);
+        // Wire click to open page inspector
+        DOM.ovRecentPages.querySelectorAll('.recent-page-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                if (e.target.tagName === 'A') return; // Allow direct link clicks
+                const url = card.dataset.url;
+                const page = pages.find(p => p.url === url);
+                if (page) openInspectorModal(page);
+            });
         });
-    });
+    }
 
-    function renderResults(pages) {
-        let filtered = pages || [];
-        if (currentFilter === '200') {
-            filtered = filtered.filter(p => p.status_code === 200);
-        } else if (currentFilter === 'error') {
-            filtered = filtered.filter(p => p.status_code !== 200);
+    function renderWorkersSnapshot(workers) {
+        if (!DOM.ovWorkersList) return;
+        if (!workers || workers.length === 0) {
+            DOM.ovWorkersList.innerHTML = `
+                <div class="empty-state-notice">
+                    <span>No worker nodes currently reporting heartbeats</span>
+                </div>
+            `;
+            return;
         }
 
-        resultsMetaText.textContent = currentSearchQuery 
-            ? `Found ${filtered.length} matches for "${currentSearchQuery}"` 
-            : `Showing ${filtered.length} indexed pages`;
+        DOM.ovWorkersList.innerHTML = workers.slice(0, 5).map(w => {
+            const isLive = w.status === 'ACTIVE' || w.status === 'IDLE';
+            const badgeClass = isLive ? 'badge-emerald' : 'badge-amber';
+            return `
+                <div class="worker-snap-row">
+                    <div class="worker-snap-id font-mono">
+                        <span class="status-mini-dot ${isLive ? 'dot-online' : 'dot-warn'}"></span>
+                        ${escapeHtml(w.worker_id || 'worker-node')}
+                    </div>
+                    <div class="worker-snap-meta">
+                        <span class="worker-snap-status ${badgeClass}">${escapeHtml(w.status || 'UNKNOWN')}</span>
+                        <span class="worker-snap-tasks font-mono">${w.tasks_completed || 0} tasks</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // =========================================================================
+    // 6. AUTO-CRAWL & SINGLE STEP DISPATCHER
+    // =========================================================================
+    function toggleAutoCrawl() {
+        state.autoCrawlActive = !state.autoCrawlActive;
+        if (DOM.autoCrawlToggle) {
+            DOM.autoCrawlToggle.classList.toggle('active', state.autoCrawlActive);
+            DOM.autoCrawlToggle.setAttribute('aria-checked', state.autoCrawlActive ? 'true' : 'false');
+        }
+
+        if (state.autoCrawlActive) {
+            showToast('Auto-Crawl loop activated', 'success');
+            runAutoCrawlStep();
+            state.autoCrawlTimer = setInterval(runAutoCrawlStep, 2500);
+        } else {
+            showToast('Auto-Crawl loop paused', 'info');
+            if (state.autoCrawlTimer) {
+                clearInterval(state.autoCrawlTimer);
+                state.autoCrawlTimer = null;
+            }
+        }
+    }
+
+    async function runAutoCrawlStep() {
+        try {
+            const res = await apiRequest('/crawl', { method: 'POST' });
+            if (res.crawled && res.crawled.url) {
+                showToast(`Crawled: ${res.crawled.url} (${res.crawled.status_code || 200})`, 'info');
+            }
+            fetchSystemStatus();
+            if (state.currentView === 'view-activity') fetchActivityLogs();
+        } catch (err) {
+            // Queue empty or quiet error
+            if (err.message && err.message.includes('Queue is empty')) {
+                // Pause auto crawl if frontier is exhausted
+                if (state.autoCrawlActive) {
+                    toggleAutoCrawl();
+                    showToast('Frontier queue exhausted — auto-crawl stopped', 'info');
+                }
+            }
+        }
+    }
+
+    async function handleManualCrawlStep() {
+        if (!DOM.crawlStepBtn) return;
+        DOM.crawlStepBtn.disabled = true;
+        const origContent = DOM.crawlStepBtn.innerHTML;
+        DOM.crawlStepBtn.innerHTML = `<span>DISPATCHING...</span>`;
+
+        try {
+            const res = await apiRequest('/crawl', { method: 'POST' });
+            if (res.crawled && res.crawled.url) {
+                showToast(`Step Dispatched: ${res.crawled.url} (${res.crawled.status_code || 200})`, 'success');
+            } else if (res.message) {
+                showToast(res.message, 'info');
+            }
+            await fetchSystemStatus();
+            if (state.currentView === 'view-search') executeSearch();
+        } catch (err) {
+            showToast(`Crawl step failed: ${err.message}`, 'error');
+        } finally {
+            DOM.crawlStepBtn.disabled = false;
+            DOM.crawlStepBtn.innerHTML = origContent;
+        }
+    }
+
+    // =========================================================================
+    // 7. CRAWL EXPLORER (VIEW 2)
+    // =========================================================================
+    function initCrawlExplorer() {
+        if (!DOM.crawlExplorerForm) return;
+
+        // Preset seed buttons
+        DOM.presetPills.forEach(pill => {
+            pill.addEventListener('click', () => {
+                const seedUrl = pill.dataset.seed;
+                if (!seedUrl) return;
+                const current = DOM.explorerUrlInput.value.trim();
+                if (!current) {
+                    DOM.explorerUrlInput.value = seedUrl;
+                } else if (!current.includes(seedUrl)) {
+                    DOM.explorerUrlInput.value = `${current}\n${seedUrl}`;
+                }
+                DOM.explorerUrlInput.focus();
+            });
+        });
+
+        // Submit form
+        DOM.crawlExplorerForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const rawUrls = DOM.explorerUrlInput.value.trim();
+            if (!rawUrls) {
+                showToast('Please enter at least one seed URL', 'error');
+                return;
+            }
+
+            const urls = rawUrls.split('\n')
+                .map(u => u.trim())
+                .filter(u => u.length > 0);
+
+            const depth = parseInt(DOM.explorerDepthInput.value, 10) || 3;
+            const pages = parseInt(DOM.explorerPagesInput.value, 10) || 100;
+            const politeness = parseInt(DOM.explorerPolitenessInput.value, 10) || 1000;
+
+            DOM.explorerSubmitBtn.disabled = true;
+            DOM.explorerSubmitBtn.innerHTML = `<span>LAUNCHING DISPATCH...</span>`;
+
+            try {
+                const res = await apiRequest('/submit', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        urls,
+                        max_depth: depth,
+                        max_pages: pages,
+                        politeness_delay_ms: politeness
+                    })
+                });
+
+                showToast(`Crawl job initiated! Added ${urls.length} seeds.`, 'success');
+
+                // Render feedback banner
+                if (DOM.explorerFeedback) {
+                    DOM.explorerFeedback.className = 'feedback-banner feedback-success';
+                    DOM.explorerFeedback.innerHTML = `
+                        <div class="feedback-icon">✓</div>
+                        <div class="feedback-text">
+                            <strong>Job Successfully Registered!</strong><br>
+                            Job ID: <code class="font-mono">${escapeHtml(res.job_id || 'job-auto')}</code> • Seeds Enqueued: ${urls.length}<br>
+                            SSRF validation passed. Frontier queue updated.
+                        </div>
+                    `;
+                    DOM.explorerFeedback.classList.remove('hidden');
+                }
+
+                DOM.explorerUrlInput.value = '';
+                await fetchSystemStatus();
+            } catch (err) {
+                showToast(`Job launch failed: ${err.message}`, 'error');
+                if (DOM.explorerFeedback) {
+                    DOM.explorerFeedback.className = 'feedback-banner feedback-error';
+                    DOM.explorerFeedback.innerHTML = `
+                        <div class="feedback-icon">✕</div>
+                        <div class="feedback-text">
+                            <strong>Submission Error:</strong> ${escapeHtml(err.message)}
+                        </div>
+                    `;
+                    DOM.explorerFeedback.classList.remove('hidden');
+                }
+            } finally {
+                DOM.explorerSubmitBtn.disabled = false;
+                DOM.explorerSubmitBtn.innerHTML = `<span>LAUNCH CRAWL JOB</span>`;
+            }
+        });
+    }
+
+    // =========================================================================
+    // 8. JOBS MANAGER (VIEW 3)
+    // =========================================================================
+    async function fetchJobs() {
+        if (!DOM.jobsTbody) return;
+        try {
+            const data = await apiRequest('/jobs');
+            const jobs = data.jobs || [];
+            state.cachedJobs = jobs;
+
+            if (DOM.sidebarJobCount) {
+                DOM.sidebarJobCount.textContent = jobs.length;
+            }
+
+            renderJobsTable(jobs);
+        } catch (err) {
+            DOM.jobsTbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center text-muted">Failed to load crawl jobs: ${escapeHtml(err.message)}</td>
+                </tr>
+            `;
+        }
+    }
+
+    function renderJobsTable(jobs) {
+        if (!DOM.jobsTbody) return;
+
+        // Apply filter
+        const filtered = state.activeJobFilter === 'ALL'
+            ? jobs
+            : jobs.filter(j => j.status === state.activeJobFilter);
 
         if (filtered.length === 0) {
-            resultsEmpty.classList.remove('hidden');
-            resultsList.innerHTML = '';
+            DOM.jobsTbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center text-muted" style="padding: 32px;">No crawl jobs match the selected filter.</td>
+                </tr>
+            `;
             return;
         }
 
-        resultsEmpty.classList.add('hidden');
-        resultsList.innerHTML = filtered.map(item => {
-            const statusCode = item.status_code || 200;
-            const badgeClass = statusCode === 200 ? 'badge-200' : (statusCode === 403 ? 'badge-403' : 'badge-err');
-            const badgeText = statusCode === 200 ? '200 OK' : (statusCode === 403 ? '403 ROBOTS' : `HTTP ${statusCode}`);
+        DOM.jobsTbody.innerHTML = filtered.map(job => {
+            const statusClassMap = {
+                'RUNNING': 'badge-emerald',
+                'COMPLETED': 'badge-cyan',
+                'PAUSED': 'badge-amber',
+                'CANCELLED': 'badge-rose'
+            };
+            const badgeClass = statusClassMap[job.status] || 'badge-cyan';
 
-            const domain = item.domain || getDomainFromUrl(item.url || item.URL);
-            const pageUrl = item.url || item.URL || '#';
-            const title = item.title || item.Title || 'Untitled Document';
-            const desc = item.description || item.Description || 'No description provided by meta tags.';
+            const canPause = job.status === 'RUNNING';
+            const canResume = job.status === 'PAUSED';
+            const canCancel = job.status === 'RUNNING' || job.status === 'PAUSED';
 
             return `
-                <div class="result-card">
-                    <div class="result-card-header">
-                        <a href="${escapeHTML(pageUrl)}" target="_blank" rel="noopener" class="result-title">
-                            ${escapeHTML(title)}
-                        </a>
-                        <span class="badge ${badgeClass}">${badgeText}</span>
-                    </div>
-
-                    <div class="result-url-row">
-                        <span class="result-domain-pill">${escapeHTML(domain)}</span>
-                        <a href="${escapeHTML(pageUrl)}" target="_blank" rel="noopener" class="result-url-text">${escapeHTML(pageUrl)}</a>
-                    </div>
-
-                    <p class="result-description">${escapeHTML(desc)}</p>
-
-                    <div class="result-card-footer">
-                        <span>Crawled ${item.latency_ms ? `${item.latency_ms}ms` : 'instant'}</span>
-                        <div class="footer-actions">
-                            <button type="button" class="action-link copy-btn" data-url="${escapeHTML(pageUrl)}">COPY URL</button>
-                            <button type="button" class="action-link inspect-btn" data-json='${escapeJSONAttr(item)}'>INSPECT</button>
+                <tr data-job-id="${escapeHtml(job.id)}">
+                    <td class="font-mono text-cyan">${escapeHtml(job.id.substring(0, 8))}...</td>
+                    <td><strong>${escapeHtml(job.name || 'Crawl Job')}</strong></td>
+                    <td><span class="badge ${badgeClass}">${escapeHtml(job.status)}</span></td>
+                    <td class="font-mono">${job.max_depth || 3}</td>
+                    <td class="font-mono">${formatNumber(job.crawled_pages || 0)} / ${formatNumber(job.max_pages || 100)}</td>
+                    <td class="font-mono text-muted">${formatRelativeTime(job.created_at)}</td>
+                    <td>
+                        <div class="row-action-btns">
+                            ${canPause ? `<button type="button" class="btn-job-action btn-job-pause" data-action="pause" data-id="${escapeHtml(job.id)}">Pause</button>` : ''}
+                            ${canResume ? `<button type="button" class="btn-job-action btn-job-resume" data-action="resume" data-id="${escapeHtml(job.id)}">Resume</button>` : ''}
+                            ${canCancel ? `<button type="button" class="btn-job-action btn-job-cancel text-rose" data-action="cancel" data-id="${escapeHtml(job.id)}">Cancel</button>` : ''}
                         </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        // Wire action buttons
+        DOM.jobsTbody.querySelectorAll('.btn-job-action').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const jobId = btn.dataset.id;
+                const action = btn.dataset.action;
+                try {
+                    await apiRequest(`/jobs/${jobId}/${action}`, { method: 'POST' });
+                    showToast(`Job ${jobId.substring(0, 8)} ${action}d`, 'info');
+                    fetchJobs();
+                } catch (err) {
+                    showToast(`Job action failed: ${err.message}`, 'error');
+                }
+            });
+        });
+    }
+
+    function initJobsView() {
+        if (!DOM.jobStatusFilters) return;
+        DOM.jobStatusFilters.querySelectorAll('.filter-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                DOM.jobStatusFilters.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                state.activeJobFilter = btn.dataset.filter || 'ALL';
+                renderJobsTable(state.cachedJobs);
+            });
+        });
+    }
+
+    // =========================================================================
+    // 9. SEARCH INDEX (VIEW 4)
+    // =========================================================================
+    async function executeSearch() {
+        if (!DOM.searchResultsContainer) return;
+        const query = DOM.searchMainInput.value.trim();
+        const status = state.activeSearchFilter;
+
+        DOM.searchResultsContainer.innerHTML = `
+            <div class="loading-state-box">
+                <span class="loading-spinner"></span>
+                <span>Executing ranked PostgreSQL query...</span>
+            </div>
+        `;
+
+        try {
+            const params = new URLSearchParams();
+            if (query) params.set('q', query);
+            if (status && status !== '0') params.set('status', status);
+
+            const res = await apiRequest(`/search?${params.toString()}`);
+            const results = res.results || [];
+            state.cachedPages = results;
+
+            if (DOM.searchTallyText) {
+                DOM.searchTallyText.textContent = `${results.length} page${results.length === 1 ? '' : 's'} indexed`;
+            }
+
+            renderSearchResults(results);
+        } catch (err) {
+            DOM.searchResultsContainer.innerHTML = `
+                <div class="empty-state-notice">
+                    <span>Search failed: ${escapeHtml(err.message)}</span>
+                </div>
+            `;
+        }
+    }
+
+    function renderSearchResults(results) {
+        if (!DOM.searchResultsContainer) return;
+        if (results.length === 0) {
+            DOM.searchResultsContainer.innerHTML = `
+                <div class="empty-state-notice">
+                    <span>No crawled pages match your query or filters</span>
+                </div>
+            `;
+            return;
+        }
+
+        DOM.searchResultsContainer.innerHTML = results.map(item => {
+            const isOk = item.status_code === 200;
+            const badgeClass = isOk ? 'status-pill-ok' : 'status-pill-err';
+            const linksCount = (item.internal_links ? item.internal_links.length : 0) + (item.external_links ? item.external_links.length : 0);
+
+            return `
+                <div class="search-result-card" data-url="${escapeHtml(item.url)}">
+                    <div class="res-header-row">
+                        <span class="status-code-badge ${badgeClass}">${item.status_code || 200}</span>
+                        <h4 class="res-title">${escapeHtml(item.title || item.url)}</h4>
+                        <span class="res-latency font-mono">${item.latency_ms || 0}ms</span>
+                    </div>
+                    <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="res-url-link font-mono">${escapeHtml(item.url)}</a>
+                    ${item.meta_description ? `<p class="res-snippet">${escapeHtml(item.meta_description)}</p>` : ''}
+                    <div class="res-meta-row">
+                        <span class="res-meta-tag">Depth: ${item.depth || 0}</span>
+                        <span class="res-meta-tag">Size: ${formatBytes(item.content_length)}</span>
+                        <span class="res-meta-tag">Links: ${linksCount || item.links_count || 0}</span>
+                        <button type="button" class="btn-inspect-page" data-url="${escapeHtml(item.url)}">INSPECT PAGE</button>
                     </div>
                 </div>
             `;
         }).join('');
 
-        // Attach action handlers for copy and inspect
-        resultsList.querySelectorAll('.copy-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const url = btn.getAttribute('data-url');
-                navigator.clipboard.writeText(url).then(() => {
-                    const original = btn.textContent;
-                    btn.textContent = 'COPIED!';
-                    setTimeout(() => btn.textContent = original, 1500);
-                });
+        // Wire inspect buttons
+        DOM.searchResultsContainer.querySelectorAll('.btn-inspect-page').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const url = btn.dataset.url;
+                const page = results.find(p => p.url === url);
+                if (page) openInspectorModal(page);
             });
         });
 
-        resultsList.querySelectorAll('.inspect-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                try {
-                    const raw = JSON.parse(btn.getAttribute('data-json'));
-                    showPageDetails(raw);
-                } catch (e) {
-                    console.error("Inspect error", e);
+        // Wire entire card click
+        DOM.searchResultsContainer.querySelectorAll('.search-result-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                if (e.target.tagName === 'A' || e.target.classList.contains('btn-inspect-page')) return;
+                const url = card.dataset.url;
+                const page = results.find(p => p.url === url);
+                if (page) openInspectorModal(page);
+            });
+        });
+    }
+
+    function initSearchView() {
+        if (!DOM.searchIndexForm) return;
+
+        DOM.searchIndexForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            executeSearch();
+        });
+
+        if (DOM.searchClearBtn) {
+            DOM.searchClearBtn.addEventListener('click', () => {
+                DOM.searchMainInput.value = '';
+                DOM.searchClearBtn.classList.add('hidden');
+                executeSearch();
+            });
+        }
+
+        if (DOM.searchMainInput) {
+            DOM.searchMainInput.addEventListener('input', () => {
+                if (DOM.searchMainInput.value.length > 0) {
+                    DOM.searchClearBtn.classList.remove('hidden');
+                } else {
+                    DOM.searchClearBtn.classList.add('hidden');
                 }
             });
-        });
-    }
-
-    function getDomainFromUrl(urlStr) {
-        try {
-            return new URL(urlStr).hostname;
-        } catch {
-            return "host";
         }
-    }
 
-    // =========================================================================
-    // 10. Seed Injection & Crawl Dispatch
-    // =========================================================================
-    seedForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const url = seedInput.value.trim();
-        if (!url) return;
-
-        submitSeedBtn.disabled = true;
-        submitSeedBtn.innerHTML = `<span>ENQUEUING...</span>`;
-
-        try {
-            const data = await apiFetch('/submit', {
-                method: 'POST',
-                body: JSON.stringify({ urls: [url] })
+        // Status filter chips
+        DOM.searchChips.forEach(chip => {
+            chip.addEventListener('click', () => {
+                DOM.searchChips.forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+                state.activeSearchFilter = chip.dataset.filter || '0';
+                executeSearch();
             });
-
-            showSeedFeedback(
-                `Successfully enqueued seed URL (${data.enqueued || 1} new). Crawl scheduled in frontier.`,
-                'success'
-            );
-            seedInput.value = '';
-            updateDashboard();
-
-        } catch (err) {
-            showSeedFeedback(`Failed to enqueue seed: ${err.message}`, 'error');
-        } finally {
-            submitSeedBtn.disabled = false;
-            submitSeedBtn.innerHTML = `<span>ENQUEUE & CRAWL</span>`;
-        }
-    });
-
-    // Preset cards
-    presetCards.forEach(card => {
-        card.addEventListener('click', () => {
-            const seed = card.getAttribute('data-seed');
-            seedInput.value = seed;
-            seedInput.focus();
         });
-    });
-
-    // Quick tag presets on empty search
-    document.querySelectorAll('.preset-tag').forEach(tag => {
-        tag.addEventListener('click', () => {
-            const q = tag.getAttribute('data-query');
-            searchInput.value = q;
-            clearSearchBtn.classList.remove('hidden');
-            performSearch(q);
-        });
-    });
-
-    function showSeedFeedback(message, type = 'success') {
-        seedFeedbackBanner.className = `feedback-banner feedback-${type}`;
-        seedFeedbackBanner.textContent = message;
-        seedFeedbackBanner.classList.remove('hidden');
-        setTimeout(() => {
-            seedFeedbackBanner.classList.add('hidden');
-        }, 5000);
     }
 
-    // Manual Crawl Step Trigger
-    crawlStepBtn.addEventListener('click', async () => {
-        crawlStepBtn.disabled = true;
-        crawlStepBtn.innerHTML = `<span>CRAWLING...</span>`;
-
+    // =========================================================================
+    // 10. DOMAINS REGISTRY (VIEW 5)
+    // =========================================================================
+    async function fetchDomains() {
+        if (!DOM.domainsBarsView) return;
         try {
-            const res = await apiFetch('/crawl', { method: 'POST' });
-            if (res.status === 'queue_empty') {
-                showSeedFeedback(res.message, 'error');
-            } else if (res.page) {
-                showSeedFeedback(`Crawl step executed on ${res.page.url}. Extracted ${res.new_links_enqueued || 0} links.`, 'success');
+            const res = await apiRequest('/domains');
+            const domains = res.domains || [];
+            state.cachedDomains = domains;
+
+            if (domains.length === 0) {
+                DOM.domainsBarsView.innerHTML = `
+                    <div class="empty-state-notice">
+                        <span>No unique host domains registered yet</span>
+                    </div>
+                `;
+                return;
             }
-            updateDashboard();
+
+            const maxPages = Math.max(...domains.map(d => d.total_pages || 1), 1);
+
+            DOM.domainsBarsView.innerHTML = domains.map(d => {
+                const count = d.total_pages || 0;
+                const pct = Math.min(100, Math.round((count / maxPages) * 100));
+                return `
+                    <div class="domain-stat-row">
+                        <div class="domain-info-col">
+                            <span class="domain-host font-mono">${escapeHtml(d.domain)}</span>
+                            <span class="domain-count font-mono">${count} page${count === 1 ? '' : 's'}</span>
+                        </div>
+                        <div class="domain-bar-track">
+                            <div class="domain-bar-fill" style="width: ${pct}%"></div>
+                        </div>
+                        <div class="domain-latency-col font-mono text-muted">
+                            ${d.avg_latency_ms || 0}ms avg
+                        </div>
+                    </div>
+                `;
+            }).join('');
         } catch (err) {
-            showSeedFeedback(`Crawl step failed: ${err.message}`, 'error');
-        } finally {
-            crawlStepBtn.disabled = false;
-            crawlStepBtn.innerHTML = `
-                <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                <span>CRAWL STEP</span>
+            DOM.domainsBarsView.innerHTML = `
+                <div class="empty-state-notice">
+                    <span>Failed to retrieve domain distribution: ${escapeHtml(err.message)}</span>
+                </div>
             `;
         }
-    });
-
-    // Auto-Crawl Switch
-    autoCrawlToggle.addEventListener('click', () => {
-        const isChecked = autoCrawlToggle.getAttribute('aria-checked') === 'true';
-        const nextState = !isChecked;
-        autoCrawlToggle.setAttribute('aria-checked', String(nextState));
-
-        if (nextState) {
-            // Start automatic periodic crawling
-            autoCrawlTimer = setInterval(async () => {
-                try {
-                    await apiFetch('/crawl', { method: 'POST' });
-                    updateDashboard();
-                } catch (e) {
-                    console.warn("Auto crawl loop error:", e);
-                }
-            }, 3500);
-            showSeedFeedback("Auto-Crawl daemon loop activated.", "success");
-        } else {
-            clearInterval(autoCrawlTimer);
-            autoCrawlTimer = null;
-            showSeedFeedback("Auto-Crawl paused.", "error");
-        }
-    });
+    }
 
     // =========================================================================
-    // 11. Tab Switching
+    // 11. WORKER FLEET MONITOR (VIEW 6)
     // =========================================================================
-    tabButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            tabButtons.forEach(b => b.classList.remove('active'));
-            tabPanes.forEach(p => p.classList.remove('active'));
-
-            btn.classList.add('active');
-            const target = btn.getAttribute('data-tab');
-            const pane = document.getElementById(target);
-            if (pane) pane.classList.add('active');
-        });
-    });
-
-    // =========================================================================
-    // 12. Stream Control (Pause / Clear)
-    // =========================================================================
-    toggleStreamBtn.addEventListener('click', () => {
-        isStreamPaused = !isStreamPaused;
-        toggleStreamBtn.textContent = isStreamPaused ? 'RESUME' : 'PAUSE';
-        toggleStreamBtn.classList.toggle('active', isStreamPaused);
-    });
-
-    clearStreamBtn.addEventListener('click', () => {
-        terminalFeed.innerHTML = `<div class="event-url text-muted">Stream cleared by operator.</div>`;
-    });
-
-    // =========================================================================
-    // 13. Wipe & Reset Modal
-    // =========================================================================
-    openResetBtn.addEventListener('click', () => {
-        resetModal.classList.remove('hidden');
-    });
-
-    cancelResetBtn.addEventListener('click', () => {
-        resetModal.classList.add('hidden');
-    });
-
-    confirmResetBtn.addEventListener('click', async () => {
-        confirmResetBtn.disabled = true;
-        confirmResetBtn.textContent = 'PURGING...';
-
+    async function fetchWorkers() {
+        if (!DOM.workersGridContainer) return;
         try {
-            await apiFetch('/reset', { method: 'POST' });
-            resetModal.classList.add('hidden');
-            searchInput.value = '';
-            cachedPages = [];
-            currentSearchQuery = '';
-            showSeedFeedback("Cluster wiped and reset. Re-seeded with https://go.dev.", "success");
-            updateDashboard();
+            const res = await apiRequest('/workers');
+            const workers = res.workers || [];
+            state.cachedWorkers = workers;
+
+            if (DOM.sidebarWorkerCount) {
+                DOM.sidebarWorkerCount.textContent = workers.length;
+            }
+
+            if (workers.length === 0) {
+                DOM.workersGridContainer.innerHTML = `
+                    <div class="empty-state-notice" style="grid-column: 1 / -1;">
+                        <span>No autonomous worker daemons registered. Mode B (Serverless) handles dispatches on demand.</span>
+                    </div>
+                `;
+                return;
+            }
+
+            DOM.workersGridContainer.innerHTML = workers.map(w => {
+                const isOnline = w.status === 'ACTIVE' || w.status === 'IDLE';
+                const statusBadge = isOnline ? 'badge-emerald' : 'badge-amber';
+                return `
+                    <div class="worker-card">
+                        <div class="worker-card-header">
+                            <div class="worker-id-group">
+                                <span class="status-mini-dot ${isOnline ? 'dot-online' : 'dot-warn'}"></span>
+                                <h4 class="worker-id font-mono">${escapeHtml(w.worker_id)}</h4>
+                            </div>
+                            <span class="badge ${statusBadge}">${escapeHtml(w.status)}</span>
+                        </div>
+                        <div class="worker-details-grid">
+                            <div class="worker-stat-item">
+                                <span class="w-label">HEARTBEAT</span>
+                                <span class="w-val font-mono">${formatRelativeTime(w.last_heartbeat)}</span>
+                            </div>
+                            <div class="worker-stat-item">
+                                <span class="w-label">COMPLETED</span>
+                                <span class="w-val font-mono text-emerald">${formatNumber(w.tasks_completed || 0)}</span>
+                            </div>
+                            <div class="worker-stat-item">
+                                <span class="w-label">FAILED</span>
+                                <span class="w-val font-mono text-rose">${formatNumber(w.tasks_failed || 0)}</span>
+                            </div>
+                            <div class="worker-stat-item">
+                                <span class="w-label">AVG LATENCY</span>
+                                <span class="w-val font-mono text-cyan">${w.avg_latency_ms || 0} ms</span>
+                            </div>
+                        </div>
+                        ${w.current_task ? `
+                            <div class="worker-current-task">
+                                <span class="w-label">CURRENT TASK</span>
+                                <div class="task-url-truncate font-mono">${escapeHtml(w.current_task)}</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
         } catch (err) {
-            alert(`Reset failed: ${err.message}`);
-        } finally {
-            confirmResetBtn.disabled = false;
-            confirmResetBtn.textContent = 'CONFIRM WIPE & RESET';
+            DOM.workersGridContainer.innerHTML = `
+                <div class="empty-state-notice" style="grid-column: 1 / -1;">
+                    <span>Failed to inspect worker fleet: ${escapeHtml(err.message)}</span>
+                </div>
+            `;
         }
-    });
-
-    // =========================================================================
-    // 14. Settings / Cluster Config Modal
-    // =========================================================================
-    openSettingsBtn.addEventListener('click', () => {
-        customApiInput.value = localStorage.getItem("crawler_api_base") || "";
-        settingsModal.classList.remove('hidden');
-    });
-
-    closeSettingsBtn.addEventListener('click', () => {
-        settingsModal.classList.add('hidden');
-    });
-
-    saveSettingsBtn.addEventListener('click', () => {
-        const val = customApiInput.value.trim();
-        setApiBase(val);
-        settingsModal.classList.add('hidden');
-        showSeedFeedback(`Backend endpoint changed to: ${getApiBase()}`, "success");
-    });
-
-    urlPresetPills.forEach(pill => {
-        pill.addEventListener('click', () => {
-            customApiInput.value = pill.getAttribute('data-url');
-        });
-    });
-
-    // Close modals on backdrop click or ESC
-    [resetModal, settingsModal, pageDetailModal].forEach(m => {
-        m.addEventListener('click', (e) => {
-            if (e.target === m) m.classList.add('hidden');
-        });
-    });
-
-    window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            resetModal.classList.add('hidden');
-            settingsModal.classList.add('hidden');
-            pageDetailModal.classList.add('hidden');
-        }
-        // Quick focus search on '/'
-        if (e.key === '/' && document.activeElement !== searchInput && document.activeElement !== seedInput) {
-            e.preventDefault();
-            searchInput.focus();
-        }
-    });
-
-    // =========================================================================
-    // 15. Page Detail Inspector Modal
-    // =========================================================================
-    closeDetailBtn.addEventListener('click', () => {
-        pageDetailModal.classList.add('hidden');
-    });
-
-    function showPageDetails(item) {
-        detailPageTitle.textContent = item.title || item.Title || 'PAGE INSPECTOR';
-        const pageUrl = item.url || item.URL || '';
-        const status = item.status_code || item.StatusCode || 200;
-
-        detailPageContent.innerHTML = `
-            <div class="detail-meta-list">
-                <div class="detail-row">
-                    <span class="detail-key">TARGET URL</span>
-                    <a href="${escapeHTML(pageUrl)}" target="_blank" rel="noopener" class="detail-val text-cyan">${escapeHTML(pageUrl)}</a>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-key">HTTP STATUS</span>
-                    <span class="detail-val ${status === 200 ? 'text-emerald' : 'text-rose'}">${status}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-key">HOST / DOMAIN</span>
-                    <span class="detail-val font-mono">${escapeHTML(item.domain || getDomainFromUrl(pageUrl))}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-key">LATENCY</span>
-                    <span class="detail-val font-mono">${item.latency_ms ? `${item.latency_ms}ms` : 'N/A'}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-key">TITLE</span>
-                    <span class="detail-val">${escapeHTML(item.title || item.Title || 'None')}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-key">META DESCRIPTION</span>
-                    <span class="detail-val text-muted">${escapeHTML(item.description || item.Description || 'None')}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-key">DISCOVERED LINKS</span>
-                    <span class="detail-val font-mono">${item.links_count || (item.links ? item.links.length : 'N/A')} links</span>
-                </div>
-            </div>
-        `;
-        pageDetailModal.classList.remove('hidden');
     }
 
     // =========================================================================
-    // 16. Utility Helpers
+    // 12. AUDITABLE ACTIVITY STREAM (VIEW 7)
     // =========================================================================
-    function escapeHTML(str) {
-        if (!str) return "";
-        return String(str)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-    }
-
-    function escapeJSONAttr(obj) {
+    async function fetchActivityLogs() {
+        if (!DOM.activityTerminalFeed || state.feedPaused) return;
         try {
-            return JSON.stringify(obj)
-                .replace(/'/g, "&apos;")
-                .replace(/"/g, "&quot;");
-        } catch {
-            return "{}";
+            const res = await apiRequest('/activity');
+            const events = res.events || [];
+            state.cachedEvents = events;
+
+            if (events.length === 0) {
+                DOM.activityTerminalFeed.innerHTML = `
+                    <div class="terminal-line text-muted">[SYSTEM] Activity stream initialized. Awaiting crawl dispatches...</div>
+                `;
+                return;
+            }
+
+            DOM.activityTerminalFeed.innerHTML = events.map(evt => {
+                const time = evt.created_at ? new Date(evt.created_at).toLocaleTimeString() : '00:00:00';
+                let typeColor = 'text-cyan';
+                if (evt.event_type.includes('ERROR') || evt.event_type.includes('FAIL')) typeColor = 'text-rose';
+                else if (evt.event_type.includes('COMPLET') || evt.event_type.includes('SUCCESS')) typeColor = 'text-emerald';
+                else if (evt.event_type.includes('LEASE')) typeColor = 'text-amber';
+
+                return `
+                    <div class="terminal-line">
+                        <span class="term-time font-mono">[${time}]</span>
+                        <span class="term-type font-mono ${typeColor}">${escapeHtml(evt.event_type)}</span>
+                        ${evt.worker_id ? `<span class="term-worker font-mono">[${escapeHtml(evt.worker_id)}]</span>` : ''}
+                        <span class="term-msg">${escapeHtml(evt.message || '')}</span>
+                    </div>
+                `;
+            }).join('');
+
+            // Auto-scroll to bottom of terminal
+            DOM.activityTerminalFeed.scrollTop = DOM.activityTerminalFeed.scrollHeight;
+        } catch (err) {
+            // Quiet fail for activity feed
+        }
+    }
+
+    function initActivityView() {
+        if (DOM.feedPauseBtn) {
+            DOM.feedPauseBtn.addEventListener('click', () => {
+                state.feedPaused = !state.feedPaused;
+                DOM.feedPauseBtn.textContent = state.feedPaused ? 'RESUME STREAM' : 'PAUSE';
+                DOM.feedPauseBtn.classList.toggle('primary-btn', state.feedPaused);
+            });
+        }
+
+        if (DOM.feedClearBtn) {
+            DOM.feedClearBtn.addEventListener('click', () => {
+                if (DOM.activityTerminalFeed) {
+                    DOM.activityTerminalFeed.innerHTML = `
+                        <div class="terminal-line text-muted">[CONSOLE] Terminal feed cleared locally.</div>
+                    `;
+                }
+            });
         }
     }
 
     // =========================================================================
-    // 17. Initialization
+    // 13. SETTINGS & TIERED RESETS (VIEW 9)
     // =========================================================================
-    updateDashboard();
-    setInterval(updateDashboard, 3000);
-});
+    function initSettingsView() {
+        // Populate current API input
+        if (DOM.backendUrlInput) {
+            DOM.backendUrlInput.value = state.apiBase;
+        }
+
+        if (DOM.saveBackendUrlBtn) {
+            DOM.saveBackendUrlBtn.addEventListener('click', async () => {
+                const newUrl = DOM.backendUrlInput.value.trim() || DEFAULT_API;
+                state.apiBase = newUrl;
+                localStorage.setItem('crawler_api_base', newUrl);
+                showToast(`Backend connection set to: ${newUrl}`, 'info');
+                await fetchSystemStatus();
+            });
+        }
+
+        // LEVEL A: Reset UI state
+        if (DOM.btnResetUi) {
+            DOM.btnResetUi.addEventListener('click', () => {
+                if (DOM.searchMainInput) DOM.searchMainInput.value = '';
+                state.activeSearchFilter = '0';
+                state.activeJobFilter = 'ALL';
+                DOM.searchChips.forEach(c => c.classList.remove('active'));
+                if (DOM.searchChips[0]) DOM.searchChips[0].classList.add('active');
+                if (DOM.jobStatusFilters) {
+                    DOM.jobStatusFilters.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
+                    if (DOM.jobStatusFilters.querySelector('[data-filter="ALL"]')) {
+                        DOM.jobStatusFilters.querySelector('[data-filter="ALL"]').classList.add('active');
+                    }
+                }
+                showToast('UI local state cleared', 'success');
+            });
+        }
+
+        // LEVEL B: Flush Redis Queue
+        if (DOM.btnResetQueue) {
+            DOM.btnResetQueue.addEventListener('click', async () => {
+                try {
+                    await apiRequest('/reset', {
+                        method: 'POST',
+                        body: JSON.stringify({ level: 'queue' })
+                    });
+                    showToast('Frontier queue successfully purged', 'success');
+                    await fetchSystemStatus();
+                } catch (err) {
+                    showToast(`Queue flush failed: ${err.message}`, 'error');
+                }
+            });
+        }
+
+        // LEVEL C: Purge Crawled Pages Data
+        if (DOM.btnResetData) {
+            DOM.btnResetData.addEventListener('click', async () => {
+                if (!confirm('Are you sure you want to purge all crawled pages and domain statistics?')) return;
+                try {
+                    await apiRequest('/reset', {
+                        method: 'POST',
+                        body: JSON.stringify({ level: 'data' })
+                    });
+                    showToast('Crawled pages database truncated', 'success');
+                    await fetchSystemStatus();
+                    if (state.currentView === 'view-search') executeSearch();
+                } catch (err) {
+                    showToast(`Data purge failed: ${err.message}`, 'error');
+                }
+            });
+        }
+
+        // LEVEL D: Full Production Reset
+        if (DOM.btnResetProd) {
+            DOM.btnResetProd.addEventListener('click', () => {
+                if (DOM.prodResetPhraseInput) DOM.prodResetPhraseInput.value = '';
+                if (DOM.confirmProdResetBtn) DOM.confirmProdResetBtn.disabled = true;
+                if (DOM.prodResetModal) DOM.prodResetModal.classList.remove('hidden');
+            });
+        }
+
+        if (DOM.cancelProdResetBtn) {
+            DOM.cancelProdResetBtn.addEventListener('click', () => {
+                if (DOM.prodResetModal) DOM.prodResetModal.classList.add('hidden');
+            });
+        }
+
+        if (DOM.prodResetPhraseInput) {
+            DOM.prodResetPhraseInput.addEventListener('input', () => {
+                const phrase = DOM.prodResetPhraseInput.value.trim();
+                DOM.confirmProdResetBtn.disabled = (phrase !== 'WIPE ALL DATA');
+            });
+        }
+
+        if (DOM.confirmProdResetBtn) {
+            DOM.confirmProdResetBtn.addEventListener('click', async () => {
+                try {
+                    await apiRequest('/reset', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            level: 'production',
+                            confirmation_phrase: 'WIPE ALL DATA'
+                        })
+                    });
+                    DOM.prodResetModal.classList.add('hidden');
+                    showToast('Cluster fully reset to clean production state', 'success');
+                    await fetchSystemStatus();
+                    refreshCurrentView();
+                } catch (err) {
+                    showToast(`Production reset failed: ${err.message}`, 'error');
+                }
+            });
+        }
+    }
+
+    // =========================================================================
+    // 14. PAGE INSPECTOR MODAL
+    // =========================================================================
+    function openInspectorModal(page) {
+        if (!DOM.pageInspectorModal || !page) return;
+
+        if (DOM.inspectorModalTitle) {
+            DOM.inspectorModalTitle.textContent = page.title || page.url;
+        }
+
+        const internalLinks = page.internal_links || [];
+        const externalLinks = page.external_links || [];
+
+        if (DOM.inspectorModalBody) {
+            DOM.inspectorModalBody.innerHTML = `
+                <div class="inspector-section">
+                    <span class="inspector-label">CANONICAL / TARGET URL</span>
+                    <a href="${escapeHtml(page.url)}" target="_blank" rel="noopener noreferrer" class="inspector-url font-mono">${escapeHtml(page.url)}</a>
+                </div>
+
+                <div class="inspector-metrics-grid">
+                    <div class="insp-stat">
+                        <span class="insp-stat-label">HTTP STATUS</span>
+                        <span class="insp-stat-val font-mono ${page.status_code === 200 ? 'text-emerald' : 'text-rose'}">${page.status_code || 200}</span>
+                    </div>
+                    <div class="insp-stat">
+                        <span class="insp-stat-label">LATENCY</span>
+                        <span class="insp-stat-val font-mono text-cyan">${page.latency_ms || 0} ms</span>
+                    </div>
+                    <div class="insp-stat">
+                        <span class="insp-stat-label">PAYLOAD SIZE</span>
+                        <span class="insp-stat-val font-mono">${formatBytes(page.content_length)}</span>
+                    </div>
+                    <div class="insp-stat">
+                        <span class="insp-stat-label">CRAWL DEPTH</span>
+                        <span class="insp-stat-val font-mono">${page.depth || 0}</span>
+                    </div>
+                </div>
+
+                ${page.meta_description ? `
+                    <div class="inspector-section">
+                        <span class="inspector-label">META DESCRIPTION</span>
+                        <p class="inspector-text">${escapeHtml(page.meta_description)}</p>
+                    </div>
+                ` : ''}
+
+                ${page.h1 ? `
+                    <div class="inspector-section">
+                        <span class="inspector-label">H1 HEADING</span>
+                        <p class="inspector-text font-mono">${escapeHtml(page.h1)}</p>
+                    </div>
+                ` : ''}
+
+                <div class="inspector-section">
+                    <span class="inspector-label">INTERNAL HYPERLINKS (${internalLinks.length})</span>
+                    <div class="inspector-link-list">
+                        ${internalLinks.length > 0 ? internalLinks.map(l => `<a href="${escapeHtml(l)}" target="_blank" rel="noopener noreferrer" class="insp-link font-mono">${escapeHtml(l)}</a>`).join('') : '<span class="text-muted">None discovered</span>'}
+                    </div>
+                </div>
+
+                <div class="inspector-section">
+                    <span class="inspector-label">EXTERNAL OUTBOUND HYPERLINKS (${externalLinks.length})</span>
+                    <div class="inspector-link-list">
+                        ${externalLinks.length > 0 ? externalLinks.map(l => `<a href="${escapeHtml(l)}" target="_blank" rel="noopener noreferrer" class="insp-link font-mono">${escapeHtml(l)}</a>`).join('') : '<span class="text-muted">None discovered</span>'}
+                    </div>
+                </div>
+            `;
+        }
+
+        DOM.pageInspectorModal.classList.remove('hidden');
+    }
+
+    function initInspectorModal() {
+        if (DOM.closeInspectorBtn) {
+            DOM.closeInspectorBtn.addEventListener('click', () => {
+                DOM.pageInspectorModal.classList.add('hidden');
+            });
+        }
+
+        if (DOM.pageInspectorModal) {
+            DOM.pageInspectorModal.addEventListener('click', (e) => {
+                if (e.target === DOM.pageInspectorModal) {
+                    DOM.pageInspectorModal.classList.add('hidden');
+                }
+            });
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if (DOM.pageInspectorModal && !DOM.pageInspectorModal.classList.contains('hidden')) {
+                    DOM.pageInspectorModal.classList.add('hidden');
+                }
+                if (DOM.prodResetModal && !DOM.prodResetModal.classList.contains('hidden')) {
+                    DOM.prodResetModal.classList.add('hidden');
+                }
+            }
+        });
+    }
+
+    // =========================================================================
+    // 15. VIEW REFRESH CONTROLLER
+    // =========================================================================
+    function refreshCurrentView() {
+        switch (state.currentView) {
+            case 'view-overview':
+                fetchSystemStatus();
+                break;
+            case 'view-jobs':
+                fetchJobs();
+                break;
+            case 'view-search':
+                executeSearch();
+                break;
+            case 'view-domains':
+                fetchDomains();
+                break;
+            case 'view-workers':
+                fetchWorkers();
+                break;
+            case 'view-activity':
+                fetchActivityLogs();
+                break;
+        }
+    }
+
+    // =========================================================================
+    // 16. APPLICATION INITIALIZATION
+    // =========================================================================
+    function init() {
+        initNavigation();
+        initCrawlExplorer();
+        initJobsView();
+        initSearchView();
+        initActivityView();
+        initSettingsView();
+        initInspectorModal();
+
+        // Header controls
+        if (DOM.autoCrawlToggle) {
+            DOM.autoCrawlToggle.addEventListener('click', toggleAutoCrawl);
+        }
+        if (DOM.crawlStepBtn) {
+            DOM.crawlStepBtn.addEventListener('click', handleManualCrawlStep);
+        }
+
+        // Initial fetch
+        fetchSystemStatus();
+
+        // Recurring background telemetry polling every 3 seconds
+        state.telemetryTimer = setInterval(() => {
+            fetchSystemStatus();
+            if (state.currentView === 'view-activity' && !state.feedPaused) {
+                fetchActivityLogs();
+            }
+        }, 3000);
+    }
+
+    // Launch on DOM ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();

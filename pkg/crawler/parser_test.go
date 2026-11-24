@@ -112,6 +112,7 @@ func TestFetchAndParse(t *testing.T) {
 
 	// 2. Initialize our parser
 	parser := NewParser(2*time.Second, "TestAgent/1.0")
+	parser.SetAllowPrivateSubnets(true) // Allow local test mock server on loopback
 
 	// 3. Perform the fetch and parse on the mock server
 	ctx := context.Background()

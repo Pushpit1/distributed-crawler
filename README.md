@@ -1,8 +1,9 @@
 # GOPHER CRAWLER ⚡
+### Production-Grade Distributed Web Crawling, Indexing & Telemetry Platform
 
-A high-performance distributed web crawler and live telemetry console written in **Go**, powered by **Redis** (FIFO Frontier queue & deduplication) and **PostgreSQL** (relational page index & unique host registry), with a production-grade **Vercel Serverless Edge console**.
+A high-performance distributed web crawler and full-text search engine written in **Go**, backed by **Redis** (atomic FIFO frontier queue, politeness buffers, and task leases) and **PostgreSQL** (relational page index with GIN-indexed `tsvector` full-text search), accompanied by an obsidian dark-mode observability console.
 
-Inspired by the precision brutalist aesthetics of [Bonanza Studios](https://www.bonanza-studios.com) and [Descycle](https://www.descycle.com) — zero AI slop, high-density telemetry, real-time worker node heartbeats, and live search.
+Inspired by the precision aesthetics of [Bonanza Studios](https://www.bonanza-studios.com) and [Descycle](https://www.descycle.com) — zero AI slop, high-density telemetry, real-time worker node heartbeats, and auditable event streams.
 
 ---
 
@@ -10,123 +11,164 @@ Inspired by the precision brutalist aesthetics of [Bonanza Studios](https://www.
 
 ```
                   ┌──────────────────────────────────────────────┐
-                  │      Vercel Serverless Edge Console         │
-                  │  (Index Explorer • Seed Injector • Telemetry)│
+                  │          OBSERVABILITY CONSOLE (UI)          │
+                  │   10-View Telemetry Dashboard & Controller   │
                   └──────────────────────┬───────────────────────┘
-                                         │ /api/*
+                                         │ HTTP REST API
                                          ▼
                   ┌──────────────────────────────────────────────┐
                   │          Go Coordinator Master Node          │
-                  │   (Task Scheduling • Politeness • Routing)   │
+                  │  - Task Scheduling & In-Flight Leases        │
+                  │  - Per-Domain Politeness Enforcement         │
+                  │  - PostgreSQL Full-Text Search (tsvector)    │
+                  │  - Stale Worker Pruning & Lease Reaper       │
                   └──────────────┬────────────────┬──────────────┘
                                  │                │
-                 Atomic Push/Pop │                │ Persist Pages
+                 Task Leases     │                │ Save Pages & Search
+                 & Frontier FIFO │                │ GIN tsvector Index
                                  ▼                ▼
                      ┌────────────────┐     ┌────────────────┐
                      │  Redis Frontier│     │   PostgreSQL   │
-                     │  (FIFO Queue & │     │ (Page Index &  │
-                     │  Visited Set)  │     │ Domain Registry│
+                     │  - FIFO Queue  │     │ - Crawled Pages│
+                     │  - Dedup Set   │     │ - Domain Stats │
+                     │  - Task Leases │     │ - Job Registry │
+                     │  - Politeness  │     │ - Event Logs   │
                      └────────────────┘     └────────────────┘
-                               ▲
-                               │ Poll / Report Tasks
-                     ┌─────────┴─────────┐
-                     │                   │
-             ┌───────────────┐   ┌───────────────┐
-             │ Crawler Node  │   │ Crawler Node  │
-             │   Worker #1   │   │   Worker #2   │
-             │(Robots.txt &  │   │(Robots.txt &  │
-             │ HTML Parsing) │   │ HTML Parsing) │
-             └───────────────┘   └───────────────┘
+                                ▲
+                                │ Claim Task Lease / Send Heartbeat
+                                │
+                     ┌──────────┴──────────┐
+                     │                     │
+             ┌───────────────┐     ┌───────────────┐
+             │ Crawler Node  │     │ Crawler Node  │
+             │   Worker #1   │     │   Worker #N   │
+             │- SSRF Dialer  │     │- SSRF Dialer  │
+             │- Robots Cache │     │- Robots Cache │
+             │- 10MB Limit   │     │- 10MB Limit   │
+             │- Heartbeat 5s │     │- Heartbeat 5s │
+             └───────┬───────┘     └───────┬───────┘
+                     │                     │
+                     └──────────┬──────────┘
+                                │ SSRF-Protected Outbound HTTP
+                                ▼
+                     ┌─────────────────────┐
+                     │  External Internet  │
+                     └─────────────────────┘
 ```
-
-### Core Components
-
-1. **Coordinator Master (`cmd/master`)**:
-   - Manages distributed task distribution, polite per-domain rate limiting, and worker heartbeats.
-   - REST API exposes `/api/status`, `/api/search`, `/api/submit`, `/api/reset`, and `/api/health`.
-2. **Worker Fleet Daemon (`cmd/worker`)**:
-   - Autonomous workers that poll the coordinator for tasks, check `robots.txt` compliance, fetch web pages with exponential backoff, extract links and metadata, and report structured findings back to the master.
-3. **URL Frontier (`pkg/crawler/frontier.go`)**:
-   - Backed by Redis `SADD` (atomic deduplication visited set) and `LPUSH`/`RPOP` (FIFO queue).
-   - Domain politeness delay prevents hammering hosts.
-4. **Relational Index (`pkg/db/postgres.go`)**:
-   - Normalizes domains and crawled pages with atomic upserts (`ON CONFLICT DO UPDATE`).
-   - Keyword search across page titles, meta descriptions, and URLs with SQL `ILIKE`.
-5. **Vercel Serverless Edge Console (`api/` + `public/`)**:
-   - Deploys natively to Vercel with zero infrastructure required.
-   - Features built-in serverless crawl engine (Node.js 18+) that actively fetches target websites, parses HTML, and registers pages in real-time, or proxies to a live Go cluster when configured with `CRAWLER_BACKEND_URL`.
 
 ---
 
-## 🚀 Live Vercel Deployment
+## 🚀 Key Highlights & Production Features
 
-Deploy the dashboard and serverless crawler directly to **Vercel**:
+- **Distributed Task Scheduling with Atomic Leases:**
+  - Tasks claimed by workers receive a 60-second in-flight lease stored in Redis (`crawl:leases`).
+  - Master node's background reaper automatically reclaims tasks from abandoned or crashed workers back into `crawl:frontier`.
+- **SSRF Hardened Outbound Network Dialer:**
+  - Blocks loopback (`127.0.0.0/8`, `::1`), private RFC1918 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), and cloud metadata (`169.254.169.254`).
+  - Strict redirect policy (max 5 hops) verifying IP addresses at every successive hop against DNS rebinding.
+  - Streaming payload limit enforced at 10 Megabytes via `io.LimitReader`.
+- **Relational PostgreSQL Persistence & Ranked Search:**
+  - Automatic idempotent database migrations on startup.
+  - Documents indexed with native PostgreSQL `tsvector` and GIN index for millisecond keyword and phrase queries.
+  - Tracks canonical URLs, title, meta description, H1 heading, HTTP status code, latency, content length, and internal/external hyperlinks.
+- **Worker Node Fleet Management:**
+  - Workers self-register on startup and maintain a 5-second background heartbeat loop.
+  - Dynamic horizontal scaling (`docker compose up -d --scale worker=5`).
+- **Tiered Data Governance & Reset Safeguards:**
+  - **Level A (UI):** Clears search filters and browser cache.
+  - **Level B (Queue):** Flushes Redis frontier queue and active leases.
+  - **Level C (Data):** Purges crawled pages and domain statistics.
+  - **Level D (Production):** Wipes database, Redis, and restarts with starter seed. Guarded by mandatory `confirmation_phrase: "WIPE ALL DATA"`.
 
-### Option 1: Via Vercel CLI
+---
+
+## 🖥️ 10 Platform Views (UI Console)
+
+1. **Overview:** High-level telemetry cards (Pages, Domains, Queue, Workers), live dispatches, worker fleet snapshot, and uptime monitor.
+2. **Crawl Explorer:** Seed injector with preset pills (Go.dev, Hacker News, Wikipedia, GitHub), depth control, page ceiling, and SSRF feedback.
+3. **Jobs Manager:** Real-time job registry tracking max depth, pages crawled, timestamps, and Pause/Resume/Cancel controls.
+4. **Search Index:** Ranked full-text search with HTTP status filters (200 OK, 403 Forbidden, 5xx Errors) and interactive Page Inspector modal.
+5. **Domains:** Discovered domain distribution bar charts with page counts and average latency.
+6. **Worker Fleet:** Node status cards reporting heartbeats, completed/failed tasks, current active URL, and average latency.
+7. **Activity Logs:** High-density terminal stream of crawl dispatches, lease expirations, and worker lifecycle events.
+8. **Analytics:** Performance dashboard displaying average crawl latency, success ratios, and lease recovery statistics.
+9. **Settings & Resets:** Backend API endpoint switcher (`/api` or `http://localhost:8080`) and tiered data reset triggers.
+10. **Documentation:** Built-in system architecture and REST API endpoint reference.
+
+---
+
+## ⚡ Quick Start
+
+### Option 1: Full Distributed Cluster (Docker Compose)
+
 ```bash
-# 1. Install Vercel CLI (if not already installed)
-npm install -g vercel
+# 1. Clone repository
+git clone https://github.com/Pushpit1/distributed-crawler.git
+cd distributed-crawler
 
-# 2. Deploy directly from repository root
+# 2. Launch master, workers, Redis, and PostgreSQL
+docker compose up -d --build
+
+# 3. Scale worker fleet
+docker compose up -d --scale worker=3
+
+# 4. Open dashboard in browser
+open http://localhost:8080
+```
+
+### Option 2: Local Development (Native Go)
+
+```bash
+# 1. Start dependencies
+docker compose up -d redis postgres
+
+# 2. Run master coordinator
+go run cmd/master/main.go
+
+# 3. In another terminal, run worker
+go run cmd/worker/main.go
+```
+
+### Option 3: Serverless Preview (Vercel)
+
+```bash
+# Run serverless test suite
+npm test
+
+# Deploy to Vercel
 vercel --prod
 ```
 
-### Option 2: Connect via GitHub
-1. Push this repository to GitHub: `https://github.com/Pushpit1/distributed-crawler`.
-2. Go to [Vercel Dashboard](https://vercel.com/new).
-3. Import your `distributed-crawler` repository.
-4. Click **Deploy**. Vercel will automatically recognize the static assets in `public/` and serverless functions in `api/`.
-
-*(Optional: Set the `CRAWLER_BACKEND_URL` environment variable in Vercel to point to your hosted Go Coordinator master node to bridge the Vercel dashboard to your distributed Docker fleet!)*
-
 ---
 
-## 🛠️ Local Development & Docker Compose
+## 🧪 Testing & Quality Assurance
 
-Run the entire distributed cluster (Master, 2 Workers, Redis, and PostgreSQL) with one command:
+Run the comprehensive unit and integration test suite across all subsystems:
 
 ```bash
-docker-compose up --build
-```
-
-### Accessing the Local Services
-- **Web Dashboard**: [http://localhost:8080](http://localhost:8080)
-- **Coordinator API**: [http://localhost:8080/api/status](http://localhost:8080/api/status)
-- **PostgreSQL**: `localhost:5433` (user: `crawler_user`, db: `crawler_db`)
-- **Redis**: `localhost:6379`
-
----
-
-## 🧪 Testing
-
-### Go Integration & Unit Tests
-Run the Go test suite:
-```bash
+# Test all Go packages
 go test -v ./...
-```
 
-### Vercel Serverless Engine Tests
-Test the Vercel serverless crawler engine:
-```bash
+# Vet codebase
+go vet ./...
+
+# Test serverless preview engine
 npm test
 ```
 
 ---
 
-## 📡 API Reference
+## 📚 Technical Documentation
 
-All endpoints support uniform CORS and can be consumed by external applications or frontend dashboards:
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/status` | Returns queue size, visited count, unique domains, active workers, uptime, and recent crawl feed. |
-| `GET` | `/api/search?q={query}` | Searches indexed pages by title, description, or URL. Empty query returns latest indexed pages. |
-| `POST` | `/api/submit` | Enqueues seed URLs into the frontier queue. Payload: `{"urls": ["https://go.dev"]}`. |
-| `POST` | `/api/crawl` | Dispatches an immediate crawl step on the next queued URL. |
-| `POST` | `/api/reset` | Flushes Redis queue and visited keys, truncates database tables, and re-seeds default start page. |
-| `GET` | `/api/health` | Health check endpoint returning cluster uptime and status. |
+- [System Architecture](docs/ARCHITECTURE.md)
+- [REST API Specification](docs/API.md)
+- [Deployment Guide](docs/DEPLOYMENT.md)
+- [Operational Runbook](docs/OPERATIONS.md)
+- [Security Specifications](docs/SECURITY.md)
+- [Project Audit & Findings](docs/PROJECT_AUDIT.md)
+- [Implementation Roadmap](docs/IMPLEMENTATION_ROADMAP.md)
 
 ---
 
 ## 📄 License
-MIT License. Built for high performance, reliability, and precision telemetry.
+MIT License. Engineered for production-grade reliability and high-throughput web discovery.
