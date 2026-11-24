@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOPHER CRAWLER — Distributed Crawl Engine & Telemetry Console</title>
+    <meta name="description" content="High-performance distributed web crawler index, live telemetry monitor, and search console.">
+    
+    <!-- Design Fonts: Inter + JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+</head>
+<body class="theme-dark">
+    <!-- Precision Background Grid & Glow Accents -->
+    <div class="bg-grid-overlay" aria-hidden="true"></div>
+    <div class="glow-spot glow-spot-1" aria-hidden="true"></div>
+    <div class="glow-spot glow-spot-2" aria-hidden="true"></div>
+
+    <div class="app-container">
+        <!-- Top Navigation Bar -->
+        <header class="app-nav">
+            <div class="nav-brand-section">
+                <div class="brand-badge">
+                    <span class="brand-bolt">⚡</span>
+                    <span class="brand-core">GOPHER</span>
+                    <span class="brand-tag">ENGINE</span>
+                </div>
+                <div class="system-status-indicator" id="system-status-pill">
+                    <span class="status-pulse-dot"></span>
+                    <span class="status-label" id="status-label-text">SYS: NOMINAL</span>
+                    <span class="status-mode" id="status-mode-tag">[EDGE]</span>
+                </div>
+            </div>
+
+            <div class="nav-actions-section">
+                <!-- Auto-Crawl Switch -->
+                <div class="control-toggle-group" title="Automatically dispatch crawl steps at periodic intervals">
+                    <span class="toggle-label">AUTO-CRAWL</span>
+                    <button type="button" id="auto-crawl-toggle" class="switch-btn" role="switch" aria-checked="false">
+                        <span class="switch-slider"></span>
+                    </button>
+                </div>
+
+                <!-- Manual Crawl Step Button -->
+                <button type="button" id="crawl-step-btn" class="nav-btn primary-action-btn" title="Dispatch one crawl task from frontier queue">
+                    <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    <span>CRAWL STEP</span>
+                </button>
+
+                <!-- Settings / Connection Button -->
+                <button type="button" id="open-settings-btn" class="nav-btn secondary-btn" title="Configure Backend Cluster URL">
+                    <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    <span>CONFIG</span>
+                </button>
+
+                <!-- Wipe & Reset Button -->
+                <button type="button" id="open-reset-btn" class="nav-btn danger-btn" title="Purge database and reset crawler state">
+                    <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                    <span>WIPE & RESET</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Telemetry Ribbon / Metrics Grid -->
+        <section class="telemetry-grid" aria-label="System Metrics">
+            <div class="telemetry-card">
+                <div class="card-meta">
+                    <span class="meta-label">PAGES INDEXED</span>
+                    <span class="meta-sub">POSTGRES / DB</span>
+                </div>
+                <div class="card-body">
+                    <div class="metric-val" id="metric-pages">0</div>
+                    <div class="metric-trend text-emerald" id="metric-pages-trend">+0 pending</div>
+                </div>
+                <div class="card-footer-bar bar-emerald"></div>
+            </div>
+
+            <div class="telemetry-card">
+                <div class="card-meta">
+                    <span class="meta-label">DOMAINS TRAVERSED</span>
+                    <span class="meta-sub">UNIQUE HOSTS</span>
+                </div>
+                <div class="card-body">
+                    <div class="metric-val" id="metric-domains">0</div>
+                    <div class="metric-trend text-cyan" id="metric-domains-trend">0 active TLDs</div>
+                </div>
+                <div class="card-footer-bar bar-cyan"></div>
+            </div>
+
+            <div class="telemetry-card">
+                <div class="card-meta">
+                    <span class="meta-label">FRONTIER QUEUE</span>
+                    <span class="meta-sub">REDIS FIFO</span>
+                </div>
+                <div class="card-body">
+                    <div class="metric-val" id="metric-queue">0</div>
+                    <div class="metric-trend text-amber" id="metric-queue-trend">Politeness delay 1000ms</div>
+                </div>
+                <div class="card-footer-bar bar-amber"></div>
+            </div>
+
+            <div class="telemetry-card">
+                <div class="card-meta">
+                    <span class="meta-label">CLUSTER UPTIME</span>
+                    <span class="meta-sub">RUNTIME</span>
+                </div>
+                <div class="card-body">
+                    <div class="metric-val" id="metric-uptime">0s</div>
+                    <div class="metric-trend text-muted" id="metric-backend-tag">Vercel Serverless</div>
+                </div>
+                <div class="card-footer-bar bar-purple"></div>
+            </div>
+        </section>
+
+        <!-- Main Workspace: Left Explorer / Right Infrastructure -->
+        <main class="workspace-grid">
+            <!-- Left Column: Search & Seed Management Console -->
+            <section class="console-panel primary-console">
+                <!-- Tab Header -->
+                <div class="console-tabs-header">
+                    <button type="button" class="tab-btn active" data-tab="search-tab">
+                        <span class="tab-indicator"></span>
+                        <span class="tab-title">INDEX EXPLORER</span>
+                    </button>
+                    <button type="button" class="tab-btn" data-tab="seed-tab">
+                        <span class="tab-indicator"></span>
+                        <span class="tab-title">SEED ENGINE</span>
+                    </button>
+                    <button type="button" class="tab-btn" data-tab="domain-tab">
+                        <span class="tab-indicator"></span>
+                        <span class="tab-title">DOMAIN METRICS</span>
+                    </button>
+                </div>
+
+                <!-- Tab 1: Search & Index Explorer -->
+                <div class="tab-pane active" id="search-tab">
+                    <!-- Search Input Form -->
+                    <form id="search-form" class="console-search-bar" role="search">
+                        <div class="search-input-field">
+                            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                            <input 
+                                type="text" 
+                                id="search-input" 
+                                placeholder="Search indexed pages by keyword, URL, or domain..." 
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                            <button type="button" id="clear-search-btn" class="clear-btn hidden" title="Clear search query">✕</button>
+                        </div>
+                        <button type="submit" class="action-btn search-submit-btn">QUERY</button>
+                    </form>
+
+                    <!-- Filter & View Bar -->
+                    <div class="results-control-bar">
+                        <div class="filter-chips">
+                            <button type="button" class="chip-btn active" data-filter="all">ALL (<span id="count-all">0</span>)</button>
+                            <button type="button" class="chip-btn" data-filter="200">200 OK (<span id="count-200">0</span>)</button>
+                            <button type="button" class="chip-btn" data-filter="error">ERRORS (<span id="count-err">0</span>)</button>
+                        </div>
+                        <div class="results-meta-info" id="results-meta-text">Showing latest crawled records</div>
+                    </div>
+
+                    <!-- Search Results Stream -->
+                    <div class="results-scroll-container">
+                        <!-- Loading State -->
+                        <div id="results-loading" class="results-state hidden">
+                            <div class="scanner-line"></div>
+                            <span class="state-text">Scanning inverted index...</span>
+                        </div>
+
+                        <!-- Empty State -->
+                        <div id="results-empty" class="results-state hidden">
+                            <div class="empty-icon-box">∅</div>
+                            <h4 class="empty-title">No Index Matches</h4>
+                            <p class="empty-desc">No indexed pages matching query. Submit new seed URLs or try a broader search phrase.</p>
+                            <div class="empty-quick-tags">
+                                <span>Try searching:</span>
+                                <button type="button" class="preset-tag" data-query="Go">Go</button>
+                                <button type="button" class="preset-tag" data-query="Wikipedia">Wikipedia</button>
+                                <button type="button" class="preset-tag" data-query="Web crawler">Crawler</button>
+                                <button type="button" class="preset-tag" data-query="Hacker News">News</button>
+                            </div>
+                        </div>
+
+                        <!-- Results List -->
+                        <div id="results-list" class="results-cards-list"></div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Seed Engine & URL Injector -->
+                <div class="tab-pane" id="seed-tab">
+                    <div class="seed-section-intro">
+                        <h4 class="section-heading">URL INJECTION & POLITE ENQUEUING</h4>
+                        <p class="section-subtext">Submit target URLs into the Redis-backed Frontier. Links will be deduplicated against the visited set and scheduled for crawling.</p>
+                    </div>
+
+                    <!-- Seed Submit Form -->
+                    <form id="seed-form" class="seed-input-form">
+                        <div class="seed-field-wrapper">
+                            <label for="seed-input" class="field-label">TARGET SEED URL</label>
+                            <div class="input-with-action">
+                                <input 
+                                    type="url" 
+                                    id="seed-input" 
+                                    placeholder="https://example.com" 
+                                    required 
+                                    autocomplete="off"
+                                >
+                                <button type="submit" class="action-btn enqueue-btn" id="submit-seed-btn">
+                                    <span>ENQUEUE & CRAWL</span>
+                                </button>
+                            </div>
+                            <span class="input-hint">Must be absolute HTTP or HTTPS URL. Robots.txt rules and politeness delay will be respected.</span>
+                        </div>
+                    </form>
+
+                    <!-- Quick Seed Presets -->
+                    <div class="seed-presets-block">
+                        <span class="field-label">QUICK SEED PRESETS</span>
+                        <div class="preset-cards-grid">
+                            <button type="button" class="preset-card" data-seed="https://go.dev">
+                                <span class="preset-domain">go.dev</span>
+                                <span class="preset-name">The Go Programming Language</span>
+                            </button>
+                            <button type="button" class="preset-card" data-seed="https://news.ycombinator.com">
+                                <span class="preset-domain">news.ycombinator.com</span>
+                                <span class="preset-name">Hacker News</span>
+                            </button>
+                            <button type="button" class="preset-card" data-seed="https://en.wikipedia.org/wiki/Distributed_computing">
+                                <span class="preset-domain">wikipedia.org</span>
+                                <span class="preset-name">Distributed Computing</span>
+                            </button>
+                            <button type="button" class="preset-card" data-seed="https://github.com/golang/go">
+                                <span class="preset-domain">github.com</span>
+                                <span class="preset-name">Go Standard Library</span>
+                            </button>
+                            <button type="button" class="preset-card" data-seed="https://arxiv.org/list/cs.DC/recent">
+                                <span class="preset-domain">arxiv.org</span>
+                                <span class="preset-name">ArXiv Distributed Systems</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Seed Submission Status Feedback -->
+                    <div id="seed-feedback-banner" class="feedback-banner hidden"></div>
+                </div>
+
+                <!-- Tab 3: Domain Metrics & TLD Breakdown -->
+                <div class="tab-pane" id="domain-tab">
+                    <div class="seed-section-intro">
+                        <h4 class="section-heading">DOMAIN DISTRIBUTION BREAKDOWN</h4>
+                        <p class="section-subtext">Proportional breakdown of pages indexed across unique hosts traversed by the crawler worker fleet.</p>
+                    </div>
+
+                    <div id="domain-distribution-chart" class="domain-bars-wrapper">
+                        <!-- Populated dynamically -->
+                    </div>
+
+                    <div id="domain-table-container" class="domain-table-wrapper">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Column: Infrastructure Telemetry & Worker Fleet -->
+            <aside class="console-panel secondary-console">
+                <!-- Section 1: Worker Nodes -->
+                <div class="telemetry-section">
+                    <div class="section-header-row">
+                        <div class="header-with-badge">
+                            <h4 class="panel-header-title">WORKER FLEET</h4>
+                            <span class="count-badge" id="active-workers-count">0 NODES</span>
+                        </div>
+                        <span class="refresh-indicator" id="worker-pulse-badge">HEARTBEAT OK</span>
+                    </div>
+
+                    <div class="worker-nodes-list" id="workers-container">
+                        <!-- Dynamically filled with worker nodes -->
+                    </div>
+                </div>
+
+                <!-- Section 2: Real-time Crawl Activity Feed -->
+                <div class="telemetry-section live-feed-section">
+                    <div class="section-header-row">
+                        <div class="header-with-badge">
+                            <h4 class="panel-header-title">LIVE CRAWL STREAM</h4>
+                            <span class="feed-pulse-indicator"></span>
+                        </div>
+                        <div class="feed-controls">
+                            <button type="button" id="toggle-stream-btn" class="feed-ctrl-btn" title="Pause or resume live telemetry feed">PAUSE</button>
+                            <button type="button" id="clear-stream-btn" class="feed-ctrl-btn" title="Clear log stream buffer">CLEAR</button>
+                        </div>
+                    </div>
+
+                    <div class="terminal-log-feed" id="terminal-feed">
+                        <!-- Dynamically populated with live activity events -->
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- App Footer -->
+        <footer class="app-footer">
+            <div class="footer-left">
+                <span class="footer-text">Distributed Web Crawler • Go Master + Worker Architecture</span>
+                <span class="footer-sep">•</span>
+                <a href="https://github.com/Pushpit1/distributed-crawler" target="_blank" rel="noopener" class="footer-link">GitHub Repository</a>
+            </div>
+            <div class="footer-right">
+                <span class="footer-text" id="footer-connection-status">Ready</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modal: Wipe & Reset Confirmation -->
+    <div id="reset-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <div class="modal-icon-badge danger-badge">⚠️</div>
+                <h3 id="reset-modal-title" class="modal-title">PURGE CRAWLER ENGINE?</h3>
+            </div>
+            <div class="modal-body">
+                <p>This action will permanently flush the <strong>Redis crawl frontier queue</strong>, truncate the <strong>PostgreSQL crawled pages & domains tables</strong>, and re-seed the default start URL (<code>https://go.dev</code>).</p>
+                <div class="warning-callout">
+                    <span>This operation resets the cluster state to a clean slate.</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="cancel-reset-btn" class="modal-btn secondary-modal-btn">CANCEL</button>
+                <button type="button" id="confirm-reset-btn" class="modal-btn danger-modal-btn">CONFIRM WIPE & RESET</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Backend Connection Settings -->
+    <div id="settings-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <div class="modal-icon-badge">⚙️</div>
+                <h3 id="settings-modal-title" class="modal-title">CLUSTER BACKEND CONFIG</h3>
+            </div>
+            <div class="modal-body">
+                <p>Select which backend endpoint the dashboard connects to. You can target the Vercel Edge Serverless functions, a local Docker Go coordinator, or a remote production cluster.</p>
+                
+                <form id="settings-form" class="settings-form">
+                    <label class="field-label" for="custom-api-input">API BASE URL</label>
+                    <input 
+                        type="text" 
+                        id="custom-api-input" 
+                        placeholder="/api (Default Vercel Edge)" 
+                        autocomplete="off"
+                    >
+                    <div class="preset-urls-group">
+                        <button type="button" class="url-preset-pill" data-url="/api">/api (Vercel Serverless)</button>
+                        <button type="button" class="url-preset-pill" data-url="http://localhost:8080">http://localhost:8080 (Go Master)</button>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="close-settings-btn" class="modal-btn secondary-modal-btn">CANCEL</button>
+                <button type="button" id="save-settings-btn" class="modal-btn primary-modal-btn">APPLY & RECONNECT</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Page Detail Inspector -->
+    <div id="page-detail-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-header">
+                <div class="modal-icon-badge">📄</div>
+                <h3 class="modal-title" id="detail-page-title">PAGE METADATA</h3>
+                <button type="button" id="close-detail-btn" class="close-modal-btn">✕</button>
+            </div>
+            <div class="modal-body" id="detail-page-content">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

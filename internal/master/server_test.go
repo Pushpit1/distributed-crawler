@@ -14,6 +14,32 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+func TestServerHealthAndCORS(t *testing.T) {
+	srv := NewCoordinatorServer(nil, nil, 0)
+
+	// Test HandleHealth
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	srv.HandleHealth(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Errorf("Expected CORS header, got %q", w.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	// Test HandleCORS
+	corsReq := httptest.NewRequest(http.MethodOptions, "/api/status", nil)
+	corsW := httptest.NewRecorder()
+	srv.HandleCORS(corsW, corsReq)
+
+	if corsW.Code != http.StatusOK {
+		t.Errorf("Expected 200 on OPTIONS preflight, got %d", corsW.Code)
+	}
+}
+
 func TestMasterWorkerIntegration(t *testing.T) {
 	// 1. Setup Redis connection
 	rdb := redis.NewClient(&redis.Options{

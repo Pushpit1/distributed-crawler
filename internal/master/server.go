@@ -25,6 +25,37 @@ type CoordinatorServer struct {
 	pgRepo          *db.PostgresRepository
 	registry        *WorkerRegistry
 	politenessDelay time.Duration
+	startTime       time.Time
+}
+
+// setCORSHeaders applies uniform permissive CORS headers for web dashboards and distributed nodes
+func setCORSHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+}
+
+// HandleCORS responds to HTTP OPTIONS preflight checks
+func (s *CoordinatorServer) HandleCORS(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w)
+	w.WriteHeader(http.StatusOK)
+}
+
+// HandleHealth handles GET /health and GET /api/health
+func (s *CoordinatorServer) HandleHealth(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":     "healthy",
+		"service":    "gopher-crawler-coordinator",
+		"uptime_sec": time.Since(s.startTime).Seconds(),
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 // NewCoordinatorServer initializes the server instance with a politeness delay and DB repo configuration
@@ -36,11 +67,18 @@ func NewCoordinatorServer(frontier *crawler.Frontier, pgRepo *db.PostgresReposit
 			workers: make(map[string]time.Time),
 		},
 		politenessDelay: politenessDelay,
+		startTime:       time.Now(),
 	}
 }
 
-// HandleRegister handles POST /register
+// HandleRegister handles POST /register and POST /api/register
 func (s *CoordinatorServer) HandleRegister(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -67,8 +105,14 @@ func (s *CoordinatorServer) HandleRegister(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// HandlePoll handles POST /poll
+// HandlePoll handles POST /poll and POST /api/poll
 func (s *CoordinatorServer) HandlePoll(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -106,8 +150,14 @@ func (s *CoordinatorServer) HandlePoll(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleReport handles POST /report
+// HandleReport handles POST /report and POST /api/report
 func (s *CoordinatorServer) HandleReport(w http.ResponseWriter, r *http.Request) {
+	setCORSHeaders(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -154,12 +204,9 @@ func (s *CoordinatorServer) HandleReport(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// HandleSearch handles GET /search
+// HandleSearch handles GET /search and GET /api/search
 func (s *CoordinatorServer) HandleSearch(w http.ResponseWriter, r *http.Request) {
-	// Enable CORS (Cross-Origin Resource Sharing) so that a frontend hosted elsewhere can connect
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	setCORSHeaders(w)
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
@@ -171,30 +218,35 @@ func (s *CoordinatorServer) HandleSearch(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	ctx := r.Context()
 	query := r.URL.Query().Get("q")
+	var results []models.SearchResult
+	var err error
+
 	if query == "" {
-		http.Error(w, "Missing query parameter 'q'", http.StatusBadRequest)
-		return
+		// If query is empty, return latest indexed pages instead of 400 error
+		results, err = s.pgRepo.GetRecentPages(ctx, 30)
+	} else {
+		results, err = s.pgRepo.SearchPages(ctx, query)
 	}
 
-	ctx := r.Context()
-	results, err := s.pgRepo.SearchPages(ctx, query)
 	if err != nil {
 		log.Printf("❌ Search query failed: %v\n", err)
 		http.Error(w, "Failed to retrieve search results", http.StatusInternalServerError)
 		return
 	}
 
+	if results == nil {
+		results = []models.SearchResult{}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)
 }
 
-// HandleStatus handles GET /status
+// HandleStatus handles GET /status and GET /api/status
 func (s *CoordinatorServer) HandleStatus(w http.ResponseWriter, r *http.Request) {
-	// Enable CORS
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	setCORSHeaders(w)
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
@@ -244,29 +296,35 @@ func (s *CoordinatorServer) HandleStatus(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	s.registry.mu.Unlock()
+	if activeWorkers == nil {
+		activeWorkers = []models.WorkerInfo{}
+	}
 
-	// 5. Get latest 5 crawls from database for activity feed
-	recentResults, err := s.pgRepo.GetRecentPages(ctx, 5)
+	// 5. Get latest 10 crawls from database for activity feed
+	recentResults, err := s.pgRepo.GetRecentPages(ctx, 10)
 	if err != nil {
 		log.Printf("❌ Failed to get recent pages: %v\n", err)
+		recentResults = []models.SearchResult{}
+	}
+	if recentResults == nil {
 		recentResults = []models.SearchResult{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(models.StatusResponse{
+		Status:       "online",
 		QueueSize:    qSize,
 		VisitedCount: vCount,
 		DomainCount:  dCount,
 		Workers:      activeWorkers,
 		RecentPages:  recentResults,
+		UptimeSec:    time.Since(s.startTime).Seconds(),
 	})
 }
 
-// HandleReset handles POST /reset
+// HandleReset handles POST /reset and POST /api/reset
 func (s *CoordinatorServer) HandleReset(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	setCORSHeaders(w)
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
@@ -308,11 +366,9 @@ func (s *CoordinatorServer) HandleReset(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// HandleSubmitSeeds handles POST /submit
+// HandleSubmitSeeds handles POST /submit and POST /api/submit
 func (s *CoordinatorServer) HandleSubmitSeeds(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	setCORSHeaders(w)
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)

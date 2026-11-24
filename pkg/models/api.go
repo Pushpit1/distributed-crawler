@@ -54,11 +54,13 @@ type WorkerInfo struct {
 
 // StatusResponse contains the full cluster status, queues, active workers, and recent crawls.
 type StatusResponse struct {
+	Status       string         `json:"status,omitempty"`
 	QueueSize    int64          `json:"queue_size"`
 	VisitedCount int64          `json:"visited_count"`
 	DomainCount  int64          `json:"domain_count"`
 	Workers      []WorkerInfo   `json:"workers"`
 	RecentPages  []SearchResult `json:"recent_pages"`
+	UptimeSec    float64        `json:"uptime_sec,omitempty"`
 }
 
 // SubmitSeedsRequest represents custom URLs submitted by the user to start crawling.

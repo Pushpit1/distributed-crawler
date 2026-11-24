@@ -1,0 +1,22 @@
+{
+  "name": "distributed-crawler",
+  "version": "1.0.0",
+  "description": "Distributed Web Crawler & Live Telemetry Console",
+  "main": "public/app.js",
+  "scripts": {
+    "start": "node -e \"console.log('Distributed Crawler serverless edge ready')\"",
+    "test": "node -e \"const { getEngine } = require('./api/_engine.js'); const e = getEngine(); console.log('Engine test OK. Visited:', e.visited.size);\""
+  },
+  "keywords": [
+    "crawler",
+    "web-crawler",
+    "distributed-systems",
+    "golang",
+    "redis",
+    "postgres",
+    "vercel",
+    "telemetry"
+  ],
+  "author": "Pushpit",
+  "license": "MIT"
+}

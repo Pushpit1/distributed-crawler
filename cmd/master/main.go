@@ -108,18 +108,55 @@ func main() {
 
 	// 7. Setup route mappings
 	mux := http.NewServeMux()
+
+	// Health check
+	mux.HandleFunc("GET /health", srv.HandleHealth)
+	mux.HandleFunc("GET /api/health", srv.HandleHealth)
+
+	// Worker Registration
 	mux.HandleFunc("POST /register", srv.HandleRegister)
+	mux.HandleFunc("POST /api/register", srv.HandleRegister)
+	mux.HandleFunc("OPTIONS /register", srv.HandleCORS)
+	mux.HandleFunc("OPTIONS /api/register", srv.HandleCORS)
+
+	// Worker Task Polling
 	mux.HandleFunc("POST /poll", srv.HandlePoll)
+	mux.HandleFunc("POST /api/poll", srv.HandlePoll)
+	mux.HandleFunc("OPTIONS /poll", srv.HandleCORS)
+	mux.HandleFunc("OPTIONS /api/poll", srv.HandleCORS)
+
+	// Worker Results Report
 	mux.HandleFunc("POST /report", srv.HandleReport)
+	mux.HandleFunc("POST /api/report", srv.HandleReport)
+	mux.HandleFunc("OPTIONS /report", srv.HandleCORS)
+	mux.HandleFunc("OPTIONS /api/report", srv.HandleCORS)
+
+	// Search Indexed Pages
 	mux.HandleFunc("GET /search", srv.HandleSearch)
+	mux.HandleFunc("GET /api/search", srv.HandleSearch)
+	mux.HandleFunc("OPTIONS /search", srv.HandleCORS)
+	mux.HandleFunc("OPTIONS /api/search", srv.HandleCORS)
+
+	// Reset Cluster State
 	mux.HandleFunc("POST /reset", srv.HandleReset)
+	mux.HandleFunc("POST /api/reset", srv.HandleReset)
+	mux.HandleFunc("OPTIONS /reset", srv.HandleCORS)
+	mux.HandleFunc("OPTIONS /api/reset", srv.HandleCORS)
+
+	// Submit Custom Seeds
 	mux.HandleFunc("POST /submit", srv.HandleSubmitSeeds)
+	mux.HandleFunc("POST /api/submit", srv.HandleSubmitSeeds)
+	mux.HandleFunc("OPTIONS /submit", srv.HandleCORS)
+	mux.HandleFunc("OPTIONS /api/submit", srv.HandleCORS)
+
+	// Cluster Real-time Status
+	mux.HandleFunc("GET /status", srv.HandleStatus)
+	mux.HandleFunc("GET /api/status", srv.HandleStatus)
+	mux.HandleFunc("OPTIONS /status", srv.HandleCORS)
+	mux.HandleFunc("OPTIONS /api/status", srv.HandleCORS)
 
 	// Serve frontend static files from the "web" directory
 	mux.Handle("GET /", http.FileServer(http.Dir("web")))
-
-	// Add status endpoint for real-time dashboard analytics
-	mux.HandleFunc("GET /status", srv.HandleStatus)
 
 	log.Printf("🚀 Coordinator API server listening on http://localhost%s\n", serverAddr)
 
