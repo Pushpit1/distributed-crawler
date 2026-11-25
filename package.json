@@ -1,11 +1,13 @@
 {
   "name": "distributed-crawler",
-  "version": "1.0.0",
-  "description": "Distributed Web Crawler & Live Telemetry Console",
+  "version": "2.0.0",
+  "description": "Production-Grade Distributed Web Crawler & Live Telemetry Platform",
   "main": "public/app.js",
   "scripts": {
     "start": "node -e \"console.log('Distributed Crawler serverless edge ready')\"",
-    "test": "node -e \"const { getEngine } = require('./api/_engine.js'); const e = getEngine(); console.log('Engine test OK. Visited:', e.visited.size);\""
+    "lint": "node -e \"const fs=require('fs'),cp=require('child_process');['api/_engine.js','api/health.js','api/ready.js','api/status.js','api/analytics.js','api/metrics.js','api/submit.js','api/crawl.js','api/search.js','api/jobs.js','api/domains.js','api/workers.js','api/activity.js','api/errors.js','api/export.js','api/reset.js','api/config.js','web/app.js','public/app.js'].forEach(f=>{cp.execFileSync(process.execPath,['--check',f],{stdio:'inherit'})});console.log('JS syntax lint OK');\"",
+    "build": "node -e \"const fs=require('fs'),path=require('path');['index.html','style.css','app.js'].forEach(f=>fs.copyFileSync(path.join('web',f),path.join('public',f)));console.log('Synced web -> public build OK');\"",
+    "test": "node --test api/engine.test.js"
   },
   "keywords": [
     "crawler",

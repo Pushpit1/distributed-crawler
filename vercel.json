@@ -3,6 +3,13 @@
   "cleanUrls": true,
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/:path*" },
+    { "source": "/health", "destination": "/api/health" },
+    { "source": "/ready", "destination": "/api/ready" },
+    { "source": "/status", "destination": "/api/status" },
+    { "source": "/search", "destination": "/api/search" },
+    { "source": "/submit", "destination": "/api/submit" },
+    { "source": "/reset", "destination": "/api/reset" },
+    { "source": "/metrics", "destination": "/api/metrics" },
     { "source": "/style.css", "destination": "/public/style.css" },
     { "source": "/app.js", "destination": "/public/app.js" },
     { "source": "/(.*)", "destination": "/public/index.html" }
@@ -12,8 +19,9 @@
       "source": "/api/(.*)",
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS, HEAD" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, X-Requested-With" }
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, PUT, DELETE, OPTIONS, HEAD" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, X-Requested-With, X-Admin-Token, X-Request-ID" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" }
       ]
     }
   ]

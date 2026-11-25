@@ -1,25 +1,36 @@
 /**
- * GOPHER CRAWLER — WEB APPLICATION CONTROLLER (v1.2.0)
- * Production-Inspired Distributed Web Crawling, Indexing & Telemetry Console
- * Strictly verified data, reactive telemetry polling, and tiered governance.
+ * GOPHER CRAWLER — ENTERPRISE OPERATOR CONSOLE (v2.0.0)
+ * Unified with Go Coordinator Master & Vercel Serverless Preview APIs.
+ * Zero fake data, complete pagination/export/analytics/job control, accessible UX.
  */
 
 (() => {
     'use strict';
 
-    // =========================================================================
-    // 1. STATE & CONFIGURATION
-    // =========================================================================
     const DEFAULT_API = '/api';
+    const PAGE_LIMIT = 15;
+
+    const PROFILE_PRESETS = {
+        small:    { max_depth: 2, max_pages: 25,  concurrency: 2, politeness_delay_ms: 1000 },
+        docs:     { max_depth: 4, max_pages: 150, concurrency: 4, politeness_delay_ms: 500 },
+        research: { max_depth: 3, max_pages: 250, concurrency: 4, politeness_delay_ms: 1500 },
+        domain:   { max_depth: 5, max_pages: 500, concurrency: 6, politeness_delay_ms: 800 },
+        custom:   { max_depth: 3, max_pages: 100, concurrency: 4, politeness_delay_ms: 1000 }
+    };
+
     const state = {
         apiBase: localStorage.getItem('crawler_api_base') || DEFAULT_API,
+        adminToken: sessionStorage.getItem('crawler_admin_token') || '',
         currentView: 'view-overview',
         autoCrawlActive: false,
         autoCrawlTimer: null,
         telemetryTimer: null,
         feedPaused: false,
-        activeSearchFilter: '0',
+        activeSearchFilter: '',
+        searchOffset: 0,
+        searchTotal: 0,
         activeJobFilter: 'ALL',
+        analyticsRange: '24h',
         latestStatus: null,
         cachedPages: [],
         cachedJobs: [],
@@ -28,139 +39,179 @@
         cachedEvents: []
     };
 
-    // =========================================================================
-    // 2. DOM ELEMENT REFERENCES
-    // =========================================================================
+    const $ = id => document.getElementById(id);
+
     const DOM = {
-        // Navigation & Header
+        sidebar: $('sidebar'),
+        mobileNavOpen: $('mobile-nav-open'),
+        mobileNavClose: $('mobile-nav-close'),
+        mobileBackdrop: $('mobile-nav-backdrop'),
         navItems: document.querySelectorAll('.nav-item[data-view]'),
         viewPanels: document.querySelectorAll('.view-panel'),
-        breadcrumbTitle: document.getElementById('breadcrumb-title'),
-        sidebarStatusBox: document.getElementById('sidebar-status-box'),
-        globalPulseDot: document.getElementById('global-pulse-dot'),
-        globalStatusText: document.getElementById('global-status-text'),
-        globalModeTag: document.getElementById('global-mode-tag'),
-        sidebarJobCount: document.getElementById('sidebar-job-count'),
-        sidebarWorkerCount: document.getElementById('sidebar-worker-count'),
-        autoCrawlToggle: document.getElementById('auto-crawl-toggle'),
-        crawlStepBtn: document.getElementById('crawl-step-btn'),
-        quickResetBtn: document.getElementById('quick-reset-btn'),
+        breadcrumbTitle: $('breadcrumb-title'),
+        globalPulseDot: $('global-pulse-dot'),
+        globalStatusText: $('global-status-text'),
+        globalModeTag: $('global-mode-tag'),
+        serverlessPill: $('serverless-mode-pill'),
+        sidebarJobCount: $('sidebar-job-count'),
+        sidebarPagesCount: $('sidebar-pages-count'),
+        sidebarWorkerCount: $('sidebar-worker-count'),
+        autoCrawlToggle: $('auto-crawl-toggle'),
+        crawlStepBtn: $('crawl-step-btn'),
+        quickResetBtn: $('quick-reset-btn'),
 
-        // Overview View
-        ovPagesCount: document.getElementById('ov-pages-count'),
-        ovPagesSub: document.getElementById('ov-pages-sub'),
-        ovDomainsCount: document.getElementById('ov-domains-count'),
-        ovDomainsSub: document.getElementById('ov-domains-sub'),
-        ovQueueCount: document.getElementById('ov-queue-count'),
-        ovQueueSub: document.getElementById('ov-queue-sub'),
-        ovWorkersCount: document.getElementById('ov-workers-count'),
-        ovWorkersSub: document.getElementById('ov-workers-sub'),
-        ovRecentPages: document.getElementById('ov-recent-pages'),
-        ovWorkersList: document.getElementById('ov-workers-list'),
-        ovUptimeVal: document.getElementById('ov-uptime-val'),
+        onboardingBanner: $('onboarding-banner'),
+        dismissOnboardingBtn: $('dismiss-onboarding-btn'),
 
-        // Crawl Explorer View
-        crawlExplorerForm: document.getElementById('crawl-explorer-form'),
-        explorerUrlInput: document.getElementById('explorer-url-input'),
-        explorerDepthInput: document.getElementById('explorer-depth-input'),
-        explorerPagesInput: document.getElementById('explorer-pages-input'),
-        explorerPolitenessInput: document.getElementById('explorer-politeness-input'),
+        ovPagesCount: $('ov-pages-count'),
+        ovPagesSub: $('ov-pages-sub'),
+        ovDomainsCount: $('ov-domains-count'),
+        ovDomainsSub: $('ov-domains-sub'),
+        ovQueueCount: $('ov-queue-count'),
+        ovQueueSub: $('ov-queue-sub'),
+        ovWorkersCount: $('ov-workers-count'),
+        ovWorkersSub: $('ov-workers-sub'),
+        ovThroughputVal: $('ov-throughput-val'),
+        ovLatencyVal: $('ov-latency-val'),
+        ovSuccessVal: $('ov-success-val'),
+        ovJobsTally: $('ov-jobs-tally'),
+        ovUptimeVal: $('ov-uptime-val'),
+        ovRecentPages: $('ov-recent-pages'),
+        ovWorkersList: $('ov-workers-list'),
+        ovDomainBars: $('ov-domain-bars'),
+        ovReclaimsVal: $('ov-reclaims-val'),
+        ovRobotsVal: $('ov-robots-val'),
+        ovRecentJobs: $('ov-recent-jobs'),
+        ovLiveLogs: $('ov-live-logs'),
+
+        profileCards: document.querySelectorAll('.profile-card[data-profile]'),
+        crawlExplorerForm: $('crawl-explorer-form'),
+        explorerNameInput: $('explorer-name-input'),
+        explorerAllowedInput: $('explorer-allowed-input'),
+        explorerUrlInput: $('explorer-url-input'),
+        explorerDepthInput: $('explorer-depth-input'),
+        explorerPagesInput: $('explorer-pages-input'),
+        explorerConcurrencyInput: $('explorer-concurrency-input'),
+        explorerPolitenessInput: $('explorer-politeness-input'),
+        explorerExcludeInput: $('explorer-exclude-input'),
+        explorerReviewSummary: $('explorer-review-summary'),
         presetPills: document.querySelectorAll('.preset-pill'),
-        explorerFeedback: document.getElementById('explorer-feedback'),
-        explorerSubmitBtn: document.getElementById('explorer-submit-btn'),
+        explorerFeedback: $('explorer-feedback'),
+        explorerSubmitBtn: $('explorer-submit-btn'),
 
-        // Jobs View
-        jobStatusFilters: document.getElementById('job-status-filters'),
-        jobsTbody: document.getElementById('jobs-tbody'),
+        jobStatusFilters: $('job-status-filters'),
+        jobsTbody: $('jobs-tbody'),
 
-        // Search Index View
-        searchIndexForm: document.getElementById('search-index-form'),
-        searchMainInput: document.getElementById('search-main-input'),
-        searchClearBtn: document.getElementById('search-clear-btn'),
+        searchIndexForm: $('search-index-form'),
+        searchMainInput: $('search-main-input'),
+        searchClearBtn: $('search-clear-btn'),
         searchChips: document.querySelectorAll('.chip-item[data-filter]'),
-        searchTallyText: document.getElementById('search-tally-text'),
-        searchResultsContainer: document.getElementById('search-results-container'),
+        searchDomainSelect: $('search-domain-select'),
+        searchSortSelect: $('search-sort-select'),
+        searchDateFrom: $('search-date-from'),
+        searchTallyText: $('search-tally-text'),
+        searchResultsContainer: $('search-results-container'),
+        searchPrevBtn: $('search-prev-btn'),
+        searchNextBtn: $('search-next-btn'),
+        searchPageIndicator: $('search-page-indicator'),
+        searchExportCsvBtn: $('search-export-csv-btn'),
+        searchExportJsonBtn: $('search-export-json-btn'),
 
-        // Domains View
-        domainsBarsView: document.getElementById('domains-bars-view'),
+        domainFilterInput: $('domain-filter-input'),
+        domainsBarsView: $('domains-bars-view'),
 
-        // Workers View
-        workersGridContainer: document.getElementById('workers-grid-container'),
-        workersLivePulse: document.getElementById('workers-live-pulse'),
+        workersGridContainer: $('workers-grid-container'),
 
-        // Activity Feed View
-        activityTerminalFeed: document.getElementById('activity-terminal-feed'),
-        feedPauseBtn: document.getElementById('feed-pause-btn'),
-        feedClearBtn: document.getElementById('feed-clear-btn'),
+        activityTerminalFeed: $('activity-terminal-feed'),
+        activitySearchInput: $('activity-search-input'),
+        activitySeveritySelect: $('activity-severity-select'),
+        feedCopyBtn: $('feed-copy-btn'),
+        feedPauseBtn: $('feed-pause-btn'),
+        feedClearBtn: $('feed-clear-btn'),
 
-        // Analytics View
-        anAvgLatency: document.getElementById('an-avg-latency'),
-        anSuccessRate: document.getElementById('an-success-rate'),
-        anRobotsRate: document.getElementById('an-robots-rate'),
-        anLeaseReclaims: document.getElementById('an-lease-reclaims'),
+        analyticsRangeSelect: $('analytics-range-select'),
+        anAvgLatency: $('an-avg-latency'),
+        anLatencyDetail: $('an-latency-detail'),
+        anSuccessRate: $('an-success-rate'),
+        anSuccessDetail: $('an-success-detail'),
+        anRobotsRate: $('an-robots-rate'),
+        anLeaseReclaims: $('an-lease-reclaims'),
+        anRetriesDetail: $('an-retries-detail'),
+        anStatusChart: $('an-status-chart'),
+        anErrorChart: $('an-error-chart'),
+        anThroughputChart: $('an-throughput-chart'),
+        anJobsChart: $('an-jobs-chart'),
 
-        // Settings View
-        backendUrlInput: document.getElementById('backend-url-input'),
-        saveBackendUrlBtn: document.getElementById('save-backend-url-btn'),
-        btnResetUi: document.getElementById('btn-reset-ui'),
-        btnResetQueue: document.getElementById('btn-reset-queue'),
-        btnResetData: document.getElementById('btn-reset-data'),
-        btnResetProd: document.getElementById('btn-reset-prod'),
+        backendUrlInput: $('backend-url-input'),
+        saveBackendUrlBtn: $('save-backend-url-btn'),
+        adminTokenInput: $('admin-token-input'),
+        saveAdminTokenBtn: $('save-admin-token-btn'),
+        resetJobSelect: $('reset-job-select'),
+        btnResetUi: $('btn-reset-ui'),
+        btnResetCancelJob: $('btn-reset-cancel-job'),
+        btnResetQueue: $('btn-reset-queue'),
+        btnResetJobData: $('btn-reset-job-data'),
+        btnResetData: $('btn-reset-data'),
+        btnResetDev: $('btn-reset-dev'),
+        btnResetProd: $('btn-reset-prod'),
 
-        // Production Reset Modal
-        prodResetModal: document.getElementById('prod-reset-modal'),
-        prodResetPhraseInput: document.getElementById('prod-reset-phrase-input'),
-        cancelProdResetBtn: document.getElementById('cancel-prod-reset-btn'),
-        confirmProdResetBtn: document.getElementById('confirm-prod-reset-btn'),
+        prodResetModal: $('prod-reset-modal'),
+        prodResetPhraseInput: $('prod-reset-phrase-input'),
+        closeProdModalBtn: $('close-prod-modal-btn'),
+        cancelProdResetBtn: $('cancel-prod-reset-btn'),
+        confirmProdResetBtn: $('confirm-prod-reset-btn'),
 
-        // Page Inspector Modal
-        pageInspectorModal: document.getElementById('page-inspector-modal'),
-        inspectorModalTitle: document.getElementById('inspector-modal-title'),
-        inspectorModalBody: document.getElementById('inspector-modal-body'),
-        closeInspectorBtn: document.getElementById('close-inspector-btn')
+        confirmModal: $('confirm-action-modal'),
+        confirmModalMessage: $('confirm-modal-message'),
+        confirmModalClose: $('confirm-modal-close'),
+        confirmModalCancel: $('confirm-modal-cancel'),
+        confirmModalProceed: $('confirm-modal-proceed'),
+
+        pageInspectorModal: $('page-inspector-modal'),
+        inspectorModalTitle: $('inspector-modal-title'),
+        inspectorModalBody: $('inspector-modal-body'),
+        closeInspectorBtn: $('close-inspector-btn'),
+
+        entityInspectorModal: $('entity-inspector-modal'),
+        entityModalBadge: $('entity-modal-badge'),
+        entityModalTitle: $('entity-modal-title'),
+        entityModalBody: $('entity-modal-body'),
+        closeEntityBtn: $('close-entity-btn')
     };
 
     // =========================================================================
-    // 3. UTILITY FUNCTIONS
+    // UTILITIES
     // =========================================================================
     function getApiUrl(path) {
         const base = state.apiBase.replace(/\/+$/, '');
-        const cleanPath = path.startsWith('/') ? path : `/${path}`;
-        return `${base}${cleanPath}`;
+        const clean = path.startsWith('/') ? path : `/${path}`;
+        return `${base}${clean}`;
     }
 
     async function apiRequest(endpoint, options = {}) {
-        const url = getApiUrl(endpoint);
-        try {
-            const res = await fetch(url, {
-                ...options,
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json',
-                    ...(options.headers || {})
-                }
-            });
-
-            if (!res.ok) {
-                let errDetail = res.statusText;
-                try {
-                    const errJson = await res.json();
-                    if (errJson.error) errDetail = errJson.error;
-                } catch {
-                    // Fall back to statusText
-                }
-                throw new Error(`${errDetail} (${res.status})`);
+        const headers = {
+            'Accept': 'application/json',
+            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(state.adminToken ? { 'X-Admin-Token': state.adminToken } : {}),
+            ...(options.headers || {})
+        };
+        const res = await fetch(getApiUrl(endpoint), { ...options, headers });
+        if (!res.ok) {
+            let errDetail = res.statusText;
+            try {
+                const errJson = await res.json();
+                if (errJson.error) errDetail = errJson.error;
+            } catch {
+                // ignore
             }
-
-            return await res.json();
-        } catch (err) {
-            console.warn(`[API] Error calling ${endpoint}:`, err);
-            throw err;
+            throw new Error(`${errDetail} (HTTP ${res.status})`);
         }
+        const ct = res.headers.get('content-type') || '';
+        return ct.includes('application/json') ? res.json() : res.text();
     }
 
     function escapeHtml(str) {
-        if (!str) return '';
+        if (str === null || str === undefined) return '';
         return String(str)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -175,84 +226,117 @@
     }
 
     function formatBytes(bytes) {
-        if (!bytes || bytes === 0) return '0 B';
+        if (!bytes || bytes <= 0) return '0 B';
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        const i = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
+        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+    }
+
+    function formatDurationSec(sec) {
+        const s = Math.max(0, Math.floor(Number(sec) || 0));
+        if (s < 60) return `${s}s`;
+        const m = Math.floor(s / 60);
+        if (m < 60) return `${m}m ${s % 60}s`;
+        const h = Math.floor(m / 60);
+        return `${h}h ${m % 60}m`;
     }
 
     function formatRelativeTime(dateStr) {
-        if (!dateStr) return 'never';
-        const date = new Date(dateStr);
-        const now = new Date();
-        const diffMs = now - date;
-        const diffSec = Math.floor(diffMs / 1000);
+        if (!dateStr) return 'unknown';
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return 'unknown';
+        const diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
         if (diffSec < 5) return 'just now';
         if (diffSec < 60) return `${diffSec}s ago`;
         const diffMin = Math.floor(diffSec / 60);
         if (diffMin < 60) return `${diffMin}m ago`;
         const diffHr = Math.floor(diffMin / 60);
         if (diffHr < 24) return `${diffHr}h ago`;
-        return date.toLocaleDateString();
+        return d.toLocaleDateString();
+    }
+
+    function statusBadgeClass(code) {
+        if (code >= 200 && code < 300) return 'status-pill-ok';
+        if (code >= 300 && code < 400) return 'status-pill-warn';
+        return 'status-pill-err';
+    }
+
+    function jobBadgeClass(status) {
+        const map = {
+            RUNNING: 'badge-emerald',
+            QUEUED: 'badge-cyan',
+            PENDING: 'badge-cyan',
+            COMPLETED: 'badge-purple',
+            PAUSED: 'badge-amber',
+            CANCELLED: 'badge-rose',
+            FAILED: 'badge-rose'
+        };
+        return map[status] || 'badge-cyan';
     }
 
     function showToast(message, type = 'info') {
-        let toastContainer = document.getElementById('platform-toast-container');
-        if (!toastContainer) {
-            toastContainer = document.createElement('div');
-            toastContainer.id = 'platform-toast-container';
-            toastContainer.className = 'toast-container';
-            document.body.appendChild(toastContainer);
+        let container = $('platform-toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'platform-toast-container';
+            container.className = 'toast-container';
+            document.body.appendChild(container);
         }
-
         const toast = document.createElement('div');
         toast.className = `toast-item toast-${type}`;
-        toast.innerHTML = `
-            <div class="toast-dot"></div>
-            <div class="toast-text">${escapeHtml(message)}</div>
-        `;
-        toastContainer.appendChild(toast);
-
-        setTimeout(() => {
-            toast.classList.add('toast-show');
-        }, 10);
-
+        toast.innerHTML = `<div class="toast-dot"></div><div>${escapeHtml(message)}</div>`;
+        container.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add('toast-show'));
         setTimeout(() => {
             toast.classList.remove('toast-show');
-            setTimeout(() => toast.remove(), 300);
-        }, 4000);
+            setTimeout(() => toast.remove(), 260);
+        }, 3800);
+    }
+
+    async function copyToClipboard(text, label = 'Copied') {
+        try {
+            await navigator.clipboard.writeText(text);
+            showToast(`${label} copied to clipboard`, 'success');
+        } catch {
+            showToast('Clipboard write unavailable in browser', 'error');
+        }
+    }
+
+    function openConfirmDialog(message, onConfirm) {
+        if (!DOM.confirmModal) return;
+        DOM.confirmModalMessage.textContent = message;
+        DOM.confirmModal.classList.remove('hidden');
+
+        const cleanup = () => {
+            DOM.confirmModal.classList.add('hidden');
+            DOM.confirmModalProceed.onclick = null;
+        };
+        DOM.confirmModalCancel.onclick = cleanup;
+        DOM.confirmModalClose.onclick = cleanup;
+        DOM.confirmModalProceed.onclick = async () => {
+            cleanup();
+            await onConfirm();
+        };
     }
 
     // =========================================================================
-    // 4. NAVIGATION & VIEW SWITCHING
+    // NAVIGATION & RESPONSIVE SIDEBAR
     // =========================================================================
+    function closeMobileNav() {
+        if (DOM.sidebar) DOM.sidebar.classList.remove('open');
+        if (DOM.mobileBackdrop) DOM.mobileBackdrop.classList.add('hidden');
+    }
+
     function switchView(viewId) {
-        if (!viewId) return;
-
-        // Update nav buttons
-        DOM.navItems.forEach(item => {
-            if (item.dataset.view === viewId) {
-                item.classList.add('active');
-            } else {
-                item.classList.remove('active');
-            }
-        });
-
-        // Update view panels
-        DOM.viewPanels.forEach(panel => {
-            if (panel.id === viewId) {
-                panel.classList.add('active');
-            } else {
-                panel.classList.remove('active');
-            }
-        });
+        if (!viewId || !$(viewId)) return;
+        DOM.navItems.forEach(item => item.classList.toggle('active', item.dataset.view === viewId));
+        DOM.viewPanels.forEach(panel => panel.classList.toggle('active', panel.id === viewId));
 
         state.currentView = viewId;
         window.location.hash = viewId.replace('view-', '');
 
-        // Update header breadcrumb
-        const titleMap = {
+        const titles = {
             'view-overview': 'OVERVIEW',
             'view-explorer': 'CRAWL EXPLORER',
             'view-jobs': 'JOBS MANAGER',
@@ -260,181 +344,239 @@
             'view-domains': 'DOMAINS REGISTRY',
             'view-workers': 'WORKER FLEET',
             'view-activity': 'ACTIVITY LOGS',
-            'view-analytics': 'PERFORMANCE & ANALYTICS',
+            'view-analytics': 'SYSTEM ANALYTICS',
             'view-settings': 'SETTINGS & RESETS',
             'view-docs': 'DOCUMENTATION'
         };
-        DOM.breadcrumbTitle.textContent = titleMap[viewId] || 'TELEMETRY';
-
-        // Refresh view data on switch
+        DOM.breadcrumbTitle.textContent = titles[viewId] || 'CONSOLE';
+        closeMobileNav();
         refreshCurrentView();
     }
 
     function initNavigation() {
-        DOM.navItems.forEach(btn => {
-            btn.addEventListener('click', () => {
-                switchView(btn.dataset.view);
-            });
+        DOM.navItems.forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
+        document.querySelectorAll('[data-view-target]').forEach(el => {
+            el.addEventListener('click', () => switchView(el.getAttribute('data-view-target')));
         });
+        if (DOM.quickResetBtn) DOM.quickResetBtn.addEventListener('click', () => switchView('view-settings'));
 
-        // Quick action link buttons (e.g. "VIEW ALL", "FLEET VIEW")
-        document.querySelectorAll('[data-view-target]').forEach(link => {
-            link.addEventListener('click', () => {
-                switchView(link.getAttribute('data-view-target'));
+        if (DOM.mobileNavOpen) {
+            DOM.mobileNavOpen.addEventListener('click', () => {
+                DOM.sidebar.classList.add('open');
+                DOM.mobileBackdrop.classList.remove('hidden');
             });
-        });
+        }
+        if (DOM.mobileNavClose) DOM.mobileNavClose.addEventListener('click', closeMobileNav);
+        if (DOM.mobileBackdrop) DOM.mobileBackdrop.addEventListener('click', closeMobileNav);
 
-        // Quick reset button in header jumps to settings view
-        if (DOM.quickResetBtn) {
-            DOM.quickResetBtn.addEventListener('click', () => {
-                switchView('view-settings');
+        if (DOM.onboardingBanner && localStorage.getItem('crawler_onboarding_dismissed') === '1') {
+            DOM.onboardingBanner.classList.add('hidden');
+        }
+        if (DOM.dismissOnboardingBtn) {
+            DOM.dismissOnboardingBtn.addEventListener('click', () => {
+                DOM.onboardingBanner.classList.add('hidden');
+                localStorage.setItem('crawler_onboarding_dismissed', '1');
             });
         }
 
-        // Handle initial hash in URL
-        const hash = window.location.hash.replace('#', '');
-        if (hash) {
-            const target = `view-${hash}`;
-            if (document.getElementById(target)) {
-                switchView(target);
-                return;
-            }
+        const hashView = window.location.hash ? `view-${window.location.hash.replace('#', '')}` : '';
+        if (hashView && $(hashView)) {
+            switchView(hashView);
+        } else {
+            switchView('view-overview');
         }
-        switchView('view-overview');
     }
 
     // =========================================================================
-    // 5. TELEMETRY POLLING & STATUS UPDATES
+    // TELEMETRY & OVERVIEW DASHBOARD
     // =========================================================================
     async function fetchSystemStatus() {
         try {
             const data = await apiRequest('/status');
             state.latestStatus = data;
 
-            // Update top badges
-            if (DOM.globalStatusText) {
-                DOM.globalStatusText.textContent = data.status === 'ok' ? 'SYSTEM ONLINE' : 'DEGRADED';
-            }
-            if (DOM.globalModeTag) {
-                const modeLabel = data.operating_mode ? `[${data.operating_mode.toUpperCase()}]` : '[MODE A: CLUSTER]';
-                DOM.globalModeTag.textContent = modeLabel;
-            }
-            if (DOM.globalPulseDot) {
-                DOM.globalPulseDot.className = 'status-indicator-dot online';
+            const isOnline = data.status === 'online' || data.status === 'ok' || data.status === 'healthy';
+            DOM.globalStatusText.textContent = isOnline ? 'SYSTEM ONLINE' : 'DEGRADED';
+            DOM.globalPulseDot.className = `status-indicator-dot ${isOnline ? 'online' : 'offline'}`;
+
+            const mode = data.mode || 'cluster';
+            const modeTextMap = {
+                cluster: '[MODE A: CLUSTER]',
+                proxy: '[MODE A: PROXY CLUSTER]',
+                serverless_preview: '[MODE B: SERVERLESS PREVIEW]'
+            };
+            DOM.globalModeTag.textContent = modeTextMap[mode] || `[${mode.toUpperCase()}]`;
+            if (DOM.serverlessPill) {
+                DOM.serverlessPill.classList.toggle('hidden', mode !== 'serverless_preview');
             }
 
-            // Update Overview Metrics
-            if (DOM.ovPagesCount) DOM.ovPagesCount.textContent = formatNumber(data.pages_crawled || 0);
-            if (DOM.ovDomainsCount) DOM.ovDomainsCount.textContent = formatNumber(data.domains_discovered || 0);
-            if (DOM.ovQueueCount) DOM.ovQueueCount.textContent = formatNumber(data.queue_size || 0);
-            if (DOM.ovWorkersCount) DOM.ovWorkersCount.textContent = formatNumber(data.workers_active || (data.workers ? data.workers.length : 0));
-            if (DOM.ovUptimeVal) DOM.ovUptimeVal.textContent = data.uptime || 'active';
+            const pagesIndexed = data.pages_indexed ?? data.visited_count ?? 0;
+            const domainCount = data.domain_count ?? 0;
+            const discoveredCount = data.discovered_urls_count ?? 0;
+            const queueSize = data.queue_size ?? 0;
+            const activeLeases = data.leases_active ?? 0;
+            const workersActive = data.workers_active ?? (data.workers ? data.workers.length : 0);
+            const activeJobs = data.active_jobs ?? 0;
 
-            if (DOM.ovQueueSub) {
-                const activeLeases = data.leases_active || 0;
-                DOM.ovQueueSub.textContent = `${activeLeases} lease${activeLeases === 1 ? '' : 's'} active`;
-            }
+            DOM.ovPagesCount.textContent = formatNumber(pagesIndexed);
+            DOM.ovPagesSub.textContent = mode === 'serverless_preview' ? 'in-memory preview index' : 'persisted in PostgreSQL';
+            DOM.ovDomainsCount.textContent = formatNumber(domainCount);
+            DOM.ovDomainsSub.textContent = `${formatNumber(discoveredCount)} URLs discovered`;
+            DOM.ovQueueCount.textContent = formatNumber(queueSize);
+            DOM.ovQueueSub.textContent = `${activeLeases} lease${activeLeases === 1 ? '' : 's'} active`;
+            DOM.ovWorkersCount.textContent = formatNumber(workersActive);
+            DOM.ovWorkersSub.textContent = `${activeJobs} job${activeJobs === 1 ? '' : 's'} running`;
 
-            // Sidebar counters
-            if (DOM.sidebarWorkerCount) {
-                DOM.sidebarWorkerCount.textContent = data.workers_active || (data.workers ? data.workers.length : 0);
-            }
+            if (DOM.ovThroughputVal) DOM.ovThroughputVal.textContent = `${Number(data.throughput_rpm || 0).toFixed(1)} rpm`;
+            if (DOM.ovLatencyVal) DOM.ovLatencyVal.textContent = `${data.avg_latency_ms || 0} ms`;
+            if (DOM.ovSuccessVal) DOM.ovSuccessVal.textContent = `${Number(data.success_rate || 0).toFixed(1)}%`;
+            if (DOM.ovJobsTally) DOM.ovJobsTally.textContent = `${data.completed_jobs || 0} / ${data.failed_jobs || 0}`;
+            if (DOM.ovUptimeVal) DOM.ovUptimeVal.textContent = formatDurationSec(data.uptime_sec || 0);
+            if (DOM.ovReclaimsVal) DOM.ovReclaimsVal.textContent = `${data.leases_reclaimed || 0} reclaimed (60s TTL)`;
+            if (DOM.ovRobotsVal) DOM.ovRobotsVal.textContent = `${data.robots_blocked || 0} disallowed`;
 
-            // Overview recent pages stream
-            if (data.recent_pages && data.recent_pages.length > 0) {
-                renderRecentPages(data.recent_pages);
-            }
+            if (DOM.sidebarPagesCount) DOM.sidebarPagesCount.textContent = formatNumber(pagesIndexed);
+            if (DOM.sidebarWorkerCount) DOM.sidebarWorkerCount.textContent = workersActive;
 
-            // Overview workers snapshot
-            if (data.workers) {
-                renderWorkersSnapshot(data.workers);
-            }
+            renderRecentPages(data.recent_pages || []);
+            renderWorkersSnapshot(data.workers || [], mode);
+            renderMiniBars(DOM.ovDomainBars, (data.domain_breakdown || []).map(d => ({
+                label: d.domain, count: d.total_pages, suffix: `${d.total_pages} pages`
+            })));
+            renderRecentJobsSnapshot(data.recent_jobs || []);
+            renderMiniLogs(data.live_logs || []);
 
             return data;
         } catch (err) {
-            if (DOM.globalStatusText) DOM.globalStatusText.textContent = 'DISCONNECTED';
-            if (DOM.globalPulseDot) DOM.globalPulseDot.className = 'status-indicator-dot offline';
-            if (DOM.globalModeTag) DOM.globalModeTag.textContent = '[UNREACHABLE]';
+            DOM.globalStatusText.textContent = 'DISCONNECTED';
+            DOM.globalPulseDot.className = 'status-indicator-dot offline';
+            DOM.globalModeTag.textContent = '[BACKEND UNREACHABLE]';
+            DOM.ovPagesCount.textContent = '--';
+            DOM.ovDomainsCount.textContent = '--';
+            DOM.ovQueueCount.textContent = '--';
+            DOM.ovWorkersCount.textContent = '--';
             return null;
         }
     }
 
     function renderRecentPages(pages) {
         if (!DOM.ovRecentPages) return;
-        DOM.ovRecentPages.innerHTML = pages.map(p => {
-            const statusClass = p.status_code === 200 ? 'status-pill-ok' : 'status-pill-err';
-            return `
-                <div class="recent-page-card" data-url="${escapeHtml(p.url)}">
-                    <div class="card-status-col">
-                        <span class="status-code-badge ${statusClass}">${p.status_code || 200}</span>
-                    </div>
-                    <div class="card-content-col">
-                        <div class="card-title-row">
-                            <h4 class="card-title">${escapeHtml(p.title || p.url)}</h4>
-                            <span class="card-latency font-mono">${p.latency_ms || 0}ms</span>
-                        </div>
-                        <a href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer" class="card-url font-mono">${escapeHtml(p.url)}</a>
-                    </div>
+        if (!pages || pages.length === 0) {
+            DOM.ovRecentPages.innerHTML = `<div class="empty-state-notice"><span>No crawled pages indexed yet. Launch a job in Crawl Explorer or click <strong>CRAWL STEP</strong>.</span></div>`;
+            return;
+        }
+        DOM.ovRecentPages.innerHTML = pages.map(p => `
+            <div class="recent-page-card" data-id="${escapeHtml(p.id)}" data-url="${escapeHtml(p.url)}">
+                <div class="card-status-col">
+                    <span class="status-code-badge ${statusBadgeClass(p.status_code)}">${p.status_code || 0}</span>
                 </div>
-            `;
-        }).join('');
+                <div class="card-content-col">
+                    <div class="card-title-row">
+                        <h4 class="card-title">${escapeHtml(p.title || p.url)}</h4>
+                        <span class="card-latency font-mono">${p.latency_ms || 0}ms</span>
+                    </div>
+                    <a href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer" class="card-url font-mono">${escapeHtml(p.url)}</a>
+                </div>
+            </div>
+        `).join('');
 
-        // Wire click to open page inspector
         DOM.ovRecentPages.querySelectorAll('.recent-page-card').forEach(card => {
-            card.addEventListener('click', (e) => {
-                if (e.target.tagName === 'A') return; // Allow direct link clicks
-                const url = card.dataset.url;
-                const page = pages.find(p => p.url === url);
-                if (page) openInspectorModal(page);
+            card.addEventListener('click', e => {
+                if (e.target.tagName === 'A') return;
+                const page = pages.find(p => String(p.id) === card.dataset.id || p.url === card.dataset.url);
+                if (page) openPageInspector(page);
             });
         });
     }
 
-    function renderWorkersSnapshot(workers) {
+    function renderWorkersSnapshot(workers, mode) {
         if (!DOM.ovWorkersList) return;
         if (!workers || workers.length === 0) {
-            DOM.ovWorkersList.innerHTML = `
-                <div class="empty-state-notice">
-                    <span>No worker nodes currently reporting heartbeats</span>
-                </div>
-            `;
+            DOM.ovWorkersList.innerHTML = mode === 'serverless_preview'
+                ? `<div class="empty-state-notice"><span>Running in <strong>Serverless Preview</strong> mode (on-demand bounded HTTP execution, 0 persistent Go daemons).</span></div>`
+                : `<div class="empty-state-notice"><span>No Go worker daemons online. Run <code>go run cmd/worker/main.go</code> or scale Docker workers.</span></div>`;
             return;
         }
-
         DOM.ovWorkersList.innerHTML = workers.slice(0, 5).map(w => {
-            const isLive = w.status === 'ACTIVE' || w.status === 'IDLE';
-            const badgeClass = isLive ? 'badge-emerald' : 'badge-amber';
+            const isOnline = w.status === 'ACTIVE' || w.status === 'IDLE';
+            const dotCls = isOnline ? 'dot-online' : (w.status === 'UNHEALTHY' ? 'dot-err' : 'dot-warn');
             return `
                 <div class="worker-snap-row">
                     <div class="worker-snap-id font-mono">
-                        <span class="status-mini-dot ${isLive ? 'dot-online' : 'dot-warn'}"></span>
-                        ${escapeHtml(w.worker_id || 'worker-node')}
+                        <span class="status-mini-dot ${dotCls}"></span>
+                        <span>${escapeHtml(w.id)}</span>
                     </div>
                     <div class="worker-snap-meta">
-                        <span class="worker-snap-status ${badgeClass}">${escapeHtml(w.status || 'UNKNOWN')}</span>
-                        <span class="worker-snap-tasks font-mono">${w.tasks_completed || 0} tasks</span>
+                        <span class="badge ${isOnline ? 'badge-emerald' : 'badge-amber'}">${escapeHtml(w.status)}</span>
+                        <span class="worker-snap-tasks font-mono">${w.tasks_completed || 0} ok</span>
                     </div>
                 </div>
             `;
         }).join('');
     }
 
+    function renderMiniBars(container, items, fillColor = 'var(--color-cyan)') {
+        if (!container) return;
+        if (!items || items.length === 0) {
+            container.innerHTML = `<span class="text-muted font-mono" style="font-size:11px;">No data recorded yet</span>`;
+            return;
+        }
+        const max = Math.max(...items.map(i => i.count || 0), 1);
+        container.innerHTML = items.map(item => {
+            const pct = Math.max(4, Math.round(((item.count || 0) / max) * 100));
+            return `
+                <div class="chart-bar-item">
+                    <div class="chart-bar-label-row">
+                        <span>${escapeHtml(item.label)}</span>
+                        <span>${escapeHtml(item.suffix || formatNumber(item.count))}</span>
+                    </div>
+                    <div class="chart-track">
+                        <div class="chart-fill" style="width:${pct}%;background:${fillColor};"></div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderRecentJobsSnapshot(jobs) {
+        if (!DOM.ovRecentJobs) return;
+        if (!jobs || jobs.length === 0) {
+            DOM.ovRecentJobs.innerHTML = `<span class="text-muted font-mono">No jobs created yet</span>`;
+            return;
+        }
+        DOM.ovRecentJobs.innerHTML = jobs.slice(0, 5).map(j => `
+            <div class="mini-job-row">
+                <span class="font-mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55%;">${escapeHtml(j.name || j.id)}</span>
+                <span><span class="badge ${jobBadgeClass(j.status)}">${escapeHtml(j.status)}</span> <span class="font-mono text-muted">${j.pages_crawled || 0}/${j.max_pages || 0}</span></span>
+            </div>
+        `).join('');
+    }
+
+    function renderMiniLogs(logs) {
+        if (!DOM.ovLiveLogs) return;
+        if (!logs || logs.length === 0) {
+            DOM.ovLiveLogs.innerHTML = `<span class="text-muted">Awaiting events...</span>`;
+            return;
+        }
+        DOM.ovLiveLogs.innerHTML = logs.slice(0, 8).map(ev => {
+            const cls = ev.severity === 'ERROR' ? 'text-rose' : (ev.severity === 'WARN' ? 'text-amber' : 'text-cyan');
+            return `<div class="mini-log-row"><span class="${cls}">[${escapeHtml(ev.event_type)}]</span> ${escapeHtml(ev.message)}</div>`;
+        }).join('');
+    }
+
     // =========================================================================
-    // 6. AUTO-CRAWL & SINGLE STEP DISPATCHER
+    // AUTO-STEP & CRAWL STEP
     // =========================================================================
     function toggleAutoCrawl() {
         state.autoCrawlActive = !state.autoCrawlActive;
-        if (DOM.autoCrawlToggle) {
-            DOM.autoCrawlToggle.classList.toggle('active', state.autoCrawlActive);
-            DOM.autoCrawlToggle.setAttribute('aria-checked', state.autoCrawlActive ? 'true' : 'false');
-        }
+        DOM.autoCrawlToggle.setAttribute('aria-checked', state.autoCrawlActive ? 'true' : 'false');
 
         if (state.autoCrawlActive) {
-            showToast('Auto-Crawl loop activated', 'success');
-            runAutoCrawlStep();
-            state.autoCrawlTimer = setInterval(runAutoCrawlStep, 2500);
+            showToast('Auto-Step crawl enabled', 'success');
+            runCrawlStep(true);
+            state.autoCrawlTimer = setInterval(() => runCrawlStep(true), 2500);
         } else {
-            showToast('Auto-Crawl loop paused', 'info');
+            showToast('Auto-Step crawl paused', 'info');
             if (state.autoCrawlTimer) {
                 clearInterval(state.autoCrawlTimer);
                 state.autoCrawlTimer = null;
@@ -442,225 +584,274 @@
         }
     }
 
-    async function runAutoCrawlStep() {
+    async function runCrawlStep(quiet = false) {
         try {
             const res = await apiRequest('/crawl', { method: 'POST' });
-            if (res.crawled && res.crawled.url) {
-                showToast(`Crawled: ${res.crawled.url} (${res.crawled.status_code || 200})`, 'info');
-            }
-            fetchSystemStatus();
-            if (state.currentView === 'view-activity') fetchActivityLogs();
-        } catch (err) {
-            // Queue empty or quiet error
-            if (err.message && err.message.includes('Queue is empty')) {
-                // Pause auto crawl if frontier is exhausted
+            if (res.page && res.page.url) {
+                showToast(`Crawled ${res.page.url} (${res.page.status_code})`, 'success');
+            } else if (res.status === 'queue_empty') {
                 if (state.autoCrawlActive) {
                     toggleAutoCrawl();
-                    showToast('Frontier queue exhausted — auto-crawl stopped', 'info');
+                    showToast('Frontier queue empty — auto-step paused', 'info');
+                } else if (!quiet) {
+                    showToast(res.message || 'Frontier queue is empty', 'info');
                 }
-            }
-        }
-    }
-
-    async function handleManualCrawlStep() {
-        if (!DOM.crawlStepBtn) return;
-        DOM.crawlStepBtn.disabled = true;
-        const origContent = DOM.crawlStepBtn.innerHTML;
-        DOM.crawlStepBtn.innerHTML = `<span>DISPATCHING...</span>`;
-
-        try {
-            const res = await apiRequest('/crawl', { method: 'POST' });
-            if (res.crawled && res.crawled.url) {
-                showToast(`Step Dispatched: ${res.crawled.url} (${res.crawled.status_code || 200})`, 'success');
-            } else if (res.message) {
+            } else if (!quiet && res.message) {
                 showToast(res.message, 'info');
             }
             await fetchSystemStatus();
             if (state.currentView === 'view-search') executeSearch();
+            if (state.currentView === 'view-jobs') fetchJobs();
         } catch (err) {
-            showToast(`Crawl step failed: ${err.message}`, 'error');
-        } finally {
-            DOM.crawlStepBtn.disabled = false;
-            DOM.crawlStepBtn.innerHTML = origContent;
+            if (!quiet) showToast(`Crawl step error: ${err.message}`, 'error');
         }
     }
 
     // =========================================================================
-    // 7. CRAWL EXPLORER (VIEW 2)
+    // CRAWL EXPLORER (VIEW 2)
     // =========================================================================
+    function updateExplorerReview() {
+        if (!DOM.explorerReviewSummary) return;
+        const depth = DOM.explorerDepthInput.value || 2;
+        const pages = DOM.explorerPagesInput.value || 25;
+        const conc = DOM.explorerConcurrencyInput.value || 2;
+        const delay = DOM.explorerPolitenessInput.value || 1000;
+        const allowed = DOM.explorerAllowedInput.value.trim() || 'Any public domain';
+        DOM.explorerReviewSummary.textContent =
+            `Policy Preview → Max Depth: ${depth} | Max Pages: ${pages} | Concurrency: ${conc} | Politeness Delay: ${delay}ms | Allowed Domains: ${allowed}`;
+    }
+
     function initCrawlExplorer() {
         if (!DOM.crawlExplorerForm) return;
 
-        // Preset seed buttons
-        DOM.presetPills.forEach(pill => {
-            pill.addEventListener('click', () => {
-                const seedUrl = pill.dataset.seed;
-                if (!seedUrl) return;
-                const current = DOM.explorerUrlInput.value.trim();
-                if (!current) {
-                    DOM.explorerUrlInput.value = seedUrl;
-                } else if (!current.includes(seedUrl)) {
-                    DOM.explorerUrlInput.value = `${current}\n${seedUrl}`;
+        DOM.profileCards.forEach(card => {
+            card.addEventListener('click', () => {
+                DOM.profileCards.forEach(c => c.classList.remove('active'));
+                card.classList.add('active');
+                const p = PROFILE_PRESETS[card.dataset.profile];
+                if (p) {
+                    DOM.explorerDepthInput.value = p.max_depth;
+                    DOM.explorerPagesInput.value = p.max_pages;
+                    DOM.explorerConcurrencyInput.value = p.concurrency;
+                    DOM.explorerPolitenessInput.value = p.politeness_delay_ms;
+                    updateExplorerReview();
                 }
-                DOM.explorerUrlInput.focus();
             });
         });
 
-        // Submit form
-        DOM.crawlExplorerForm.addEventListener('submit', async (e) => {
+        [DOM.explorerDepthInput, DOM.explorerPagesInput, DOM.explorerConcurrencyInput, DOM.explorerPolitenessInput, DOM.explorerAllowedInput].forEach(inp => {
+            if (inp) inp.addEventListener('input', updateExplorerReview);
+        });
+        updateExplorerReview();
+
+        DOM.presetPills.forEach(pill => {
+            pill.addEventListener('click', () => {
+                const seed = pill.dataset.seed;
+                if (!seed) return;
+                const cur = DOM.explorerUrlInput.value.trim();
+                DOM.explorerUrlInput.value = !cur ? seed : (cur.includes(seed) ? cur : `${cur}\n${seed}`);
+            });
+        });
+
+        DOM.crawlExplorerForm.addEventListener('submit', async e => {
             e.preventDefault();
-            const rawUrls = DOM.explorerUrlInput.value.trim();
-            if (!rawUrls) {
-                showToast('Please enter at least one seed URL', 'error');
+            const urls = DOM.explorerUrlInput.value.split('\n').map(u => u.trim()).filter(Boolean);
+            if (urls.length === 0) {
+                showToast('Enter at least one seed URL', 'error');
                 return;
             }
 
-            const urls = rawUrls.split('\n')
-                .map(u => u.trim())
-                .filter(u => u.length > 0);
-
-            const depth = parseInt(DOM.explorerDepthInput.value, 10) || 3;
-            const pages = parseInt(DOM.explorerPagesInput.value, 10) || 100;
-            const politeness = parseInt(DOM.explorerPolitenessInput.value, 10) || 1000;
+            const allowedDomains = DOM.explorerAllowedInput.value.split(',').map(s => s.trim()).filter(Boolean);
+            const excludePatterns = DOM.explorerExcludeInput.value.split('\n').map(s => s.trim()).filter(Boolean);
 
             DOM.explorerSubmitBtn.disabled = true;
-            DOM.explorerSubmitBtn.innerHTML = `<span>LAUNCHING DISPATCH...</span>`;
+            DOM.explorerSubmitBtn.innerHTML = '<span>SUBMITTING & VALIDATING...</span>';
 
             try {
                 const res = await apiRequest('/submit', {
                     method: 'POST',
                     body: JSON.stringify({
+                        name: DOM.explorerNameInput.value.trim(),
                         urls,
-                        max_depth: depth,
-                        max_pages: pages,
-                        politeness_delay_ms: politeness
+                        max_depth: parseInt(DOM.explorerDepthInput.value, 10) || 3,
+                        max_pages: parseInt(DOM.explorerPagesInput.value, 10) || 100,
+                        concurrency: parseInt(DOM.explorerConcurrencyInput.value, 10) || 2,
+                        politeness_delay_ms: parseInt(DOM.explorerPolitenessInput.value, 10) || 1000,
+                        allowed_domains: allowedDomains,
+                        exclude_patterns: excludePatterns
                     })
                 });
 
-                showToast(`Crawl job initiated! Added ${urls.length} seeds.`, 'success');
-
-                // Render feedback banner
-                if (DOM.explorerFeedback) {
-                    DOM.explorerFeedback.className = 'feedback-banner feedback-success';
-                    DOM.explorerFeedback.innerHTML = `
-                        <div class="feedback-icon">✓</div>
-                        <div class="feedback-text">
-                            <strong>Job Successfully Registered!</strong><br>
-                            Job ID: <code class="font-mono">${escapeHtml(res.job_id || 'job-auto')}</code> • Seeds Enqueued: ${urls.length}<br>
-                            SSRF validation passed. Frontier queue updated.
-                        </div>
-                    `;
-                    DOM.explorerFeedback.classList.remove('hidden');
-                }
-
-                DOM.explorerUrlInput.value = '';
+                showToast(`Crawl job ${res.job_id || ''} launched (${res.enqueued || urls.length} seeds)`, 'success');
+                DOM.explorerFeedback.className = 'feedback-banner feedback-success';
+                DOM.explorerFeedback.innerHTML = `
+                    <div class="feedback-icon">✓</div>
+                    <div>
+                        <strong>Crawl Job Registered</strong><br>
+                        Job ID: <code class="font-mono">${escapeHtml(res.job_id)}</code> • Enqueued: ${res.enqueued} seed(s)<br>
+                        SSRF validation passed. Workers are polling structured tasks.
+                    </div>
+                `;
+                DOM.explorerFeedback.classList.remove('hidden');
                 await fetchSystemStatus();
             } catch (err) {
-                showToast(`Job launch failed: ${err.message}`, 'error');
-                if (DOM.explorerFeedback) {
-                    DOM.explorerFeedback.className = 'feedback-banner feedback-error';
-                    DOM.explorerFeedback.innerHTML = `
-                        <div class="feedback-icon">✕</div>
-                        <div class="feedback-text">
-                            <strong>Submission Error:</strong> ${escapeHtml(err.message)}
-                        </div>
-                    `;
-                    DOM.explorerFeedback.classList.remove('hidden');
-                }
+                showToast(`Launch failed: ${err.message}`, 'error');
+                DOM.explorerFeedback.className = 'feedback-banner feedback-error';
+                DOM.explorerFeedback.innerHTML = `<div class="feedback-icon">✕</div><div><strong>Rejected:</strong> ${escapeHtml(err.message)}</div>`;
+                DOM.explorerFeedback.classList.remove('hidden');
             } finally {
                 DOM.explorerSubmitBtn.disabled = false;
-                DOM.explorerSubmitBtn.innerHTML = `<span>LAUNCH CRAWL JOB</span>`;
+                DOM.explorerSubmitBtn.innerHTML = '<span>LAUNCH CRAWL JOB</span>';
             }
         });
     }
 
     // =========================================================================
-    // 8. JOBS MANAGER (VIEW 3)
+    // JOBS MANAGER (VIEW 3)
     // =========================================================================
     async function fetchJobs() {
         if (!DOM.jobsTbody) return;
         try {
             const data = await apiRequest('/jobs');
-            const jobs = data.jobs || [];
+            const jobs = Array.isArray(data) ? data : (data.jobs || []);
             state.cachedJobs = jobs;
-
-            if (DOM.sidebarJobCount) {
-                DOM.sidebarJobCount.textContent = jobs.length;
-            }
-
+            if (DOM.sidebarJobCount) DOM.sidebarJobCount.textContent = jobs.length;
+            populateJobDropdown(jobs);
             renderJobsTable(jobs);
         } catch (err) {
-            DOM.jobsTbody.innerHTML = `
-                <tr>
-                    <td colspan="7" class="text-center text-muted">Failed to load crawl jobs: ${escapeHtml(err.message)}</td>
-                </tr>
-            `;
+            DOM.jobsTbody.innerHTML = `<tr><td colspan="7" class="text-rose">Failed loading jobs: ${escapeHtml(err.message)}</td></tr>`;
         }
     }
 
-    function renderJobsTable(jobs) {
-        if (!DOM.jobsTbody) return;
+    function populateJobDropdown(jobs) {
+        if (!DOM.resetJobSelect) return;
+        const prev = DOM.resetJobSelect.value;
+        DOM.resetJobSelect.innerHTML = `<option value="">Select Job ID...</option>` +
+            jobs.map(j => `<option value="${escapeHtml(j.id)}">${escapeHtml(j.id)} — ${escapeHtml(j.name)} (${escapeHtml(j.status)})</option>`).join('');
+        if (prev) DOM.resetJobSelect.value = prev;
+    }
 
-        // Apply filter
+    function renderJobsTable(jobs) {
         const filtered = state.activeJobFilter === 'ALL'
             ? jobs
             : jobs.filter(j => j.status === state.activeJobFilter);
 
         if (filtered.length === 0) {
-            DOM.jobsTbody.innerHTML = `
-                <tr>
-                    <td colspan="7" class="text-center text-muted" style="padding: 32px;">No crawl jobs match the selected filter.</td>
-                </tr>
-            `;
+            DOM.jobsTbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:28px;" class="text-muted">No crawl jobs match "${escapeHtml(state.activeJobFilter)}". Launch one from Crawl Explorer.</td></tr>`;
             return;
         }
 
-        DOM.jobsTbody.innerHTML = filtered.map(job => {
-            const statusClassMap = {
-                'RUNNING': 'badge-emerald',
-                'COMPLETED': 'badge-cyan',
-                'PAUSED': 'badge-amber',
-                'CANCELLED': 'badge-rose'
-            };
-            const badgeClass = statusClassMap[job.status] || 'badge-cyan';
-
-            const canPause = job.status === 'RUNNING';
-            const canResume = job.status === 'PAUSED';
-            const canCancel = job.status === 'RUNNING' || job.status === 'PAUSED';
+        DOM.jobsTbody.innerHTML = filtered.map(j => {
+            const crawled = j.pages_crawled || 0;
+            const maxPages = j.max_pages || 100;
+            const pct = Math.min(100, Math.round((crawled / maxPages) * 100));
+            const canPause = j.status === 'RUNNING';
+            const canResume = j.status === 'PAUSED';
+            const canCancel = j.status === 'RUNNING' || j.status === 'PAUSED' || j.status === 'QUEUED';
+            const canRetry = (j.pages_failed || 0) > 0 || j.status === 'FAILED';
 
             return `
-                <tr data-job-id="${escapeHtml(job.id)}">
-                    <td class="font-mono text-cyan">${escapeHtml(job.id.substring(0, 8))}...</td>
-                    <td><strong>${escapeHtml(job.name || 'Crawl Job')}</strong></td>
-                    <td><span class="badge ${badgeClass}">${escapeHtml(job.status)}</span></td>
-                    <td class="font-mono">${job.max_depth || 3}</td>
-                    <td class="font-mono">${formatNumber(job.crawled_pages || 0)} / ${formatNumber(job.max_pages || 100)}</td>
-                    <td class="font-mono text-muted">${formatRelativeTime(job.created_at)}</td>
+                <tr>
+                    <td class="font-mono text-cyan">${escapeHtml(j.id)}</td>
+                    <td>
+                        <strong>${escapeHtml(j.name || 'Crawl Job')}</strong>
+                        <div class="text-muted" style="font-size:10px;">${escapeHtml((j.seed_urls || []).slice(0, 2).join(', '))}</div>
+                    </td>
+                    <td><span class="badge ${jobBadgeClass(j.status)}">${escapeHtml(j.status)}</span></td>
+                    <td>
+                        <span>${formatNumber(crawled)} / ${formatNumber(maxPages)} (${j.pages_failed || 0} err)</span>
+                        <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+                    </td>
+                    <td>${j.current_depth || 0} / ${j.max_depth || 3}</td>
+                    <td class="text-muted">${formatRelativeTime(j.created_at)}</td>
                     <td>
                         <div class="row-action-btns">
-                            ${canPause ? `<button type="button" class="btn-job-action btn-job-pause" data-action="pause" data-id="${escapeHtml(job.id)}">Pause</button>` : ''}
-                            ${canResume ? `<button type="button" class="btn-job-action btn-job-resume" data-action="resume" data-id="${escapeHtml(job.id)}">Resume</button>` : ''}
-                            ${canCancel ? `<button type="button" class="btn-job-action btn-job-cancel text-rose" data-action="cancel" data-id="${escapeHtml(job.id)}">Cancel</button>` : ''}
+                            <button type="button" class="btn-job-action" data-op="inspect" data-id="${escapeHtml(j.id)}">Inspect</button>
+                            ${canPause ? `<button type="button" class="btn-job-action" data-op="pause" data-id="${escapeHtml(j.id)}">Pause</button>` : ''}
+                            ${canResume ? `<button type="button" class="btn-job-action" data-op="resume" data-id="${escapeHtml(j.id)}">Resume</button>` : ''}
+                            ${canRetry ? `<button type="button" class="btn-job-action" data-op="retry" data-id="${escapeHtml(j.id)}">Retry Failed</button>` : ''}
+                            ${canCancel ? `<button type="button" class="btn-job-action text-rose" data-op="cancel" data-id="${escapeHtml(j.id)}">Cancel</button>` : ''}
+                            <button type="button" class="btn-job-action" data-op="export" data-id="${escapeHtml(j.id)}">Export</button>
                         </div>
                     </td>
                 </tr>
             `;
         }).join('');
 
-        // Wire action buttons
         DOM.jobsTbody.querySelectorAll('.btn-job-action').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const jobId = btn.dataset.id;
-                const action = btn.dataset.action;
-                try {
-                    await apiRequest(`/jobs/${jobId}/${action}`, { method: 'POST' });
-                    showToast(`Job ${jobId.substring(0, 8)} ${action}d`, 'info');
-                    fetchJobs();
-                } catch (err) {
-                    showToast(`Job action failed: ${err.message}`, 'error');
+                const op = btn.dataset.op;
+                if (op === 'inspect') return openJobInspector(jobId);
+                if (op === 'export') {
+                    window.open(getApiUrl(`/jobs/${encodeURIComponent(jobId)}/export?format=json`), '_blank');
+                    return;
+                }
+                const execOp = async () => {
+                    try {
+                        await apiRequest(`/jobs/${encodeURIComponent(jobId)}/${op}`, { method: 'POST' });
+                        showToast(`Job ${jobId} ${op} executed`, 'success');
+                        fetchJobs();
+                        fetchSystemStatus();
+                    } catch (err) {
+                        showToast(`Job action error: ${err.message}`, 'error');
+                    }
+                };
+                if (op === 'cancel') {
+                    openConfirmDialog(`Cancel crawl job "${jobId}"? Remaining queued URLs for this job will be discarded.`, execOp);
+                } else {
+                    await execOp();
                 }
             });
         });
+    }
+
+    async function openJobInspector(jobId) {
+        try {
+            const detail = await apiRequest(`/jobs/${encodeURIComponent(jobId)}`);
+            const job = detail.job || {};
+            const errors = detail.errors || [];
+            const events = detail.events || [];
+            const workers = detail.associated_workers || [];
+
+            DOM.entityModalBadge.textContent = `JOB // ${job.status || ''}`;
+            DOM.entityModalTitle.textContent = `${job.name || job.id}`;
+            DOM.entityModalBody.innerHTML = `
+                <div class="inspector-metrics-grid">
+                    <div class="insp-stat"><span class="insp-stat-label">CRAWLED</span><span class="insp-stat-val font-mono text-emerald">${job.pages_crawled || 0} / ${job.max_pages || 0}</span></div>
+                    <div class="insp-stat"><span class="insp-stat-label">FAILED</span><span class="insp-stat-val font-mono text-rose">${job.pages_failed || 0}</span></div>
+                    <div class="insp-stat"><span class="insp-stat-label">DISCOVERED URLS</span><span class="insp-stat-val font-mono text-cyan">${job.discovered_count || 0}</span></div>
+                    <div class="insp-stat"><span class="insp-stat-label">DEPTH</span><span class="insp-stat-val font-mono">${job.current_depth || 0} / ${job.max_depth || 0}</span></div>
+                </div>
+                <div class="inspector-section">
+                    <span class="inspector-label">SEED URLS</span>
+                    <div class="inspector-link-list">${(detail.seeds || []).map(u => `<span class="insp-link font-mono">${escapeHtml(u)}</span>`).join('')}</div>
+                </div>
+                <div class="inspector-section">
+                    <span class="inspector-label">ASSOCIATED WORKERS (${workers.length})</span>
+                    <div class="font-mono">${workers.length ? escapeHtml(workers.join(', ')) : 'None recorded'}</div>
+                </div>
+                <div class="inspector-section">
+                    <span class="inspector-label">RECENT ERRORS (${errors.length})</span>
+                    <div class="inspector-link-list">
+                        ${errors.length ? errors.map(er => `<div class="font-mono text-rose" style="font-size:11px;">[${escapeHtml(er.error_type)}] ${escapeHtml(er.url)} — ${escapeHtml(er.error_message)}</div>`).join('') : '<span class="text-muted">Zero errors recorded</span>'}
+                    </div>
+                </div>
+                <div class="inspector-section">
+                    <span class="inspector-label">EVENT HISTORY (${events.length})</span>
+                    <div class="inspector-link-list">
+                        ${events.map(ev => `<div class="font-mono" style="font-size:11px;">[${escapeHtml(ev.event_type)}] ${escapeHtml(ev.message)}</div>`).join('') || '<span class="text-muted">No events</span>'}
+                    </div>
+                </div>
+                <div class="form-row">
+                    <button type="button" class="telemetry-btn secondary-btn" onclick="window.open('${escapeHtml(getApiUrl(`/jobs/${encodeURIComponent(jobId)}/export?format=csv`))}','_blank')">EXPORT CSV</button>
+                    <button type="button" class="telemetry-btn secondary-btn" onclick="window.open('${escapeHtml(getApiUrl(`/jobs/${encodeURIComponent(jobId)}/export?format=json`))}','_blank')">EXPORT JSON</button>
+                </div>
+            `;
+            DOM.entityInspectorModal.classList.remove('hidden');
+        } catch (err) {
+            showToast(`Failed loading job details: ${err.message}`, 'error');
+        }
     }
 
     function initJobsView() {
@@ -676,202 +867,294 @@
     }
 
     // =========================================================================
-    // 9. SEARCH INDEX (VIEW 4)
+    // SEARCH INDEX (VIEW 4)
     // =========================================================================
-    async function executeSearch() {
-        if (!DOM.searchResultsContainer) return;
-        const query = DOM.searchMainInput.value.trim();
-        const status = state.activeSearchFilter;
+    function buildSearchParams(limit = PAGE_LIMIT, offset = state.searchOffset) {
+        const params = new URLSearchParams();
+        const q = DOM.searchMainInput ? DOM.searchMainInput.value.trim() : '';
+        if (q) params.set('q', q);
+        if (state.activeSearchFilter) params.set('status', state.activeSearchFilter);
+        if (DOM.searchDomainSelect && DOM.searchDomainSelect.value) params.set('domain', DOM.searchDomainSelect.value);
+        if (DOM.searchSortSelect && DOM.searchSortSelect.value) params.set('sort', DOM.searchSortSelect.value);
+        if (DOM.searchDateFrom && DOM.searchDateFrom.value) params.set('from', DOM.searchDateFrom.value);
+        params.set('limit', String(limit));
+        params.set('offset', String(offset));
+        return params;
+    }
 
-        DOM.searchResultsContainer.innerHTML = `
-            <div class="loading-state-box">
-                <span class="loading-spinner"></span>
-                <span>Executing ranked PostgreSQL query...</span>
-            </div>
-        `;
+    async function populateDomainFilter() {
+        if (!DOM.searchDomainSelect) return;
+        try {
+            const res = await apiRequest('/domains?limit=100');
+            const domains = Array.isArray(res) ? res : (res.domains || []);
+            const currentVal = DOM.searchDomainSelect.value;
+            DOM.searchDomainSelect.innerHTML = `<option value="">All Domains (${domains.length})</option>` +
+                domains.map(d => `<option value="${escapeHtml(d.domain)}">${escapeHtml(d.domain)} (${d.total_pages})</option>`).join('');
+            DOM.searchDomainSelect.value = currentVal;
+        } catch {
+            // ignore
+        }
+    }
+
+    async function executeSearch(resetOffset = false) {
+        if (!DOM.searchResultsContainer) return;
+        if (resetOffset) state.searchOffset = 0;
+
+        DOM.searchResultsContainer.innerHTML = `<div class="loading-state-box"><span>Querying ranked PostgreSQL search index...</span></div>`;
 
         try {
-            const params = new URLSearchParams();
-            if (query) params.set('q', query);
-            if (status && status !== '0') params.set('status', status);
-
+            const params = buildSearchParams(PAGE_LIMIT, state.searchOffset);
             const res = await apiRequest(`/search?${params.toString()}`);
-            const results = res.results || [];
+            const results = Array.isArray(res) ? res : (res.results || []);
+            const total = Array.isArray(res) ? results.length : (res.total ?? results.length);
             state.cachedPages = results;
+            state.searchTotal = total;
 
             if (DOM.searchTallyText) {
-                DOM.searchTallyText.textContent = `${results.length} page${results.length === 1 ? '' : 's'} indexed`;
+                const startIdx = total === 0 ? 0 : state.searchOffset + 1;
+                const endIdx = state.searchOffset + results.length;
+                DOM.searchTallyText.textContent = `Showing ${startIdx}–${endIdx} of ${total} page(s)`;
             }
+
+            const currentPageNum = Math.floor(state.searchOffset / PAGE_LIMIT) + 1;
+            const totalPages = Math.max(1, Math.ceil(total / PAGE_LIMIT));
+            if (DOM.searchPageIndicator) DOM.searchPageIndicator.textContent = `Page ${currentPageNum} / ${totalPages}`;
+            if (DOM.searchPrevBtn) DOM.searchPrevBtn.disabled = state.searchOffset <= 0;
+            if (DOM.searchNextBtn) DOM.searchNextBtn.disabled = (state.searchOffset + results.length) >= total;
 
             renderSearchResults(results);
         } catch (err) {
-            DOM.searchResultsContainer.innerHTML = `
-                <div class="empty-state-notice">
-                    <span>Search failed: ${escapeHtml(err.message)}</span>
-                </div>
-            `;
+            DOM.searchResultsContainer.innerHTML = `<div class="empty-state-notice"><span class="text-rose">Search error: ${escapeHtml(err.message)}</span></div>`;
         }
     }
 
     function renderSearchResults(results) {
-        if (!DOM.searchResultsContainer) return;
         if (results.length === 0) {
             DOM.searchResultsContainer.innerHTML = `
                 <div class="empty-state-notice">
-                    <span>No crawled pages match your query or filters</span>
+                    <strong>No crawled pages found matching your filters</strong>
+                    <span>Try clearing search keywords/filters or launch a new crawl in Crawl Explorer.</span>
                 </div>
             `;
             return;
         }
 
-        DOM.searchResultsContainer.innerHTML = results.map(item => {
-            const isOk = item.status_code === 200;
-            const badgeClass = isOk ? 'status-pill-ok' : 'status-pill-err';
-            const linksCount = (item.internal_links ? item.internal_links.length : 0) + (item.external_links ? item.external_links.length : 0);
-
-            return `
-                <div class="search-result-card" data-url="${escapeHtml(item.url)}">
-                    <div class="res-header-row">
-                        <span class="status-code-badge ${badgeClass}">${item.status_code || 200}</span>
-                        <h4 class="res-title">${escapeHtml(item.title || item.url)}</h4>
-                        <span class="res-latency font-mono">${item.latency_ms || 0}ms</span>
-                    </div>
-                    <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="res-url-link font-mono">${escapeHtml(item.url)}</a>
-                    ${item.meta_description ? `<p class="res-snippet">${escapeHtml(item.meta_description)}</p>` : ''}
-                    <div class="res-meta-row">
-                        <span class="res-meta-tag">Depth: ${item.depth || 0}</span>
-                        <span class="res-meta-tag">Size: ${formatBytes(item.content_length)}</span>
-                        <span class="res-meta-tag">Links: ${linksCount || item.links_count || 0}</span>
-                        <button type="button" class="btn-inspect-page" data-url="${escapeHtml(item.url)}">INSPECT PAGE</button>
-                    </div>
+        DOM.searchResultsContainer.innerHTML = results.map(item => `
+            <div class="search-result-card" data-id="${escapeHtml(item.id)}" data-url="${escapeHtml(item.url)}">
+                <div class="res-header-row">
+                    <span class="status-code-badge ${statusBadgeClass(item.status_code)}">${item.status_code || 0}</span>
+                    <h4 class="res-title">${escapeHtml(item.title || item.url)}</h4>
+                    <span class="res-latency font-mono">${item.latency_ms || 0}ms</span>
                 </div>
-            `;
-        }).join('');
+                <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="res-url-link font-mono">${escapeHtml(item.url)}</a>
+                ${item.description ? `<p class="res-snippet">${escapeHtml(item.description)}</p>` : ''}
+                <div class="res-meta-row">
+                    <span class="res-meta-tag">${escapeHtml(item.domain || '')}</span>
+                    <span class="res-meta-tag">Depth: ${item.depth || 0}</span>
+                    <span class="res-meta-tag">Size: ${formatBytes(item.content_length)}</span>
+                    <span class="res-meta-tag">Links: ${item.links_count || 0}</span>
+                    <span class="res-meta-tag">${formatRelativeTime(item.crawled_at)}</span>
+                    <button type="button" class="btn-inspect-page" data-copy="${escapeHtml(item.url)}">COPY URL</button>
+                    <button type="button" class="btn-inspect-page" data-inspect-id="${escapeHtml(item.id)}" data-url="${escapeHtml(item.url)}">INSPECT PAGE</button>
+                </div>
+            </div>
+        `).join('');
 
-        // Wire inspect buttons
-        DOM.searchResultsContainer.querySelectorAll('.btn-inspect-page').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+        DOM.searchResultsContainer.querySelectorAll('[data-copy]').forEach(btn => {
+            btn.addEventListener('click', e => {
                 e.stopPropagation();
-                const url = btn.dataset.url;
-                const page = results.find(p => p.url === url);
-                if (page) openInspectorModal(page);
+                copyToClipboard(btn.dataset.copy, 'URL');
             });
         });
 
-        // Wire entire card click
         DOM.searchResultsContainer.querySelectorAll('.search-result-card').forEach(card => {
-            card.addEventListener('click', (e) => {
-                if (e.target.tagName === 'A' || e.target.classList.contains('btn-inspect-page')) return;
-                const url = card.dataset.url;
-                const page = results.find(p => p.url === url);
-                if (page) openInspectorModal(page);
+            card.addEventListener('click', e => {
+                if (e.target.tagName === 'A' || e.target.hasAttribute('data-copy')) return;
+                const p = results.find(r => String(r.id) === card.dataset.id || r.url === card.dataset.url);
+                if (p) openPageInspector(p);
             });
         });
     }
 
     function initSearchView() {
         if (!DOM.searchIndexForm) return;
-
-        DOM.searchIndexForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            executeSearch();
-        });
-
+        DOM.searchIndexForm.addEventListener('submit', e => { e.preventDefault(); executeSearch(true); });
         if (DOM.searchClearBtn) {
             DOM.searchClearBtn.addEventListener('click', () => {
                 DOM.searchMainInput.value = '';
                 DOM.searchClearBtn.classList.add('hidden');
-                executeSearch();
+                executeSearch(true);
             });
         }
-
-        if (DOM.searchMainInput) {
-            DOM.searchMainInput.addEventListener('input', () => {
-                if (DOM.searchMainInput.value.length > 0) {
-                    DOM.searchClearBtn.classList.remove('hidden');
-                } else {
-                    DOM.searchClearBtn.classList.add('hidden');
-                }
-            });
-        }
-
-        // Status filter chips
+        DOM.searchMainInput.addEventListener('input', () => {
+            DOM.searchClearBtn.classList.toggle('hidden', DOM.searchMainInput.value.length === 0);
+        });
         DOM.searchChips.forEach(chip => {
             chip.addEventListener('click', () => {
                 DOM.searchChips.forEach(c => c.classList.remove('active'));
                 chip.classList.add('active');
-                state.activeSearchFilter = chip.dataset.filter || '0';
-                executeSearch();
+                state.activeSearchFilter = chip.dataset.filter || '';
+                executeSearch(true);
+            });
+        });
+        [DOM.searchDomainSelect, DOM.searchSortSelect, DOM.searchDateFrom].forEach(sel => {
+            if (sel) sel.addEventListener('change', () => executeSearch(true));
+        });
+        if (DOM.searchPrevBtn) {
+            DOM.searchPrevBtn.addEventListener('click', () => {
+                state.searchOffset = Math.max(0, state.searchOffset - PAGE_LIMIT);
+                executeSearch(false);
+            });
+        }
+        if (DOM.searchNextBtn) {
+            DOM.searchNextBtn.addEventListener('click', () => {
+                state.searchOffset += PAGE_LIMIT;
+                executeSearch(false);
+            });
+        }
+        if (DOM.searchExportCsvBtn) {
+            DOM.searchExportCsvBtn.addEventListener('click', () => {
+                const params = buildSearchParams(200, 0);
+                params.set('format', 'csv');
+                window.open(getApiUrl(`/export?${params.toString()}`), '_blank');
+            });
+        }
+        if (DOM.searchExportJsonBtn) {
+            DOM.searchExportJsonBtn.addEventListener('click', () => {
+                const params = buildSearchParams(200, 0);
+                params.set('format', 'json');
+                window.open(getApiUrl(`/export?${params.toString()}`), '_blank');
+            });
+        }
+    }
+
+    // =========================================================================
+    // PAGE DETAIL INSPECTOR MODAL
+    // =========================================================================
+    async function openPageInspector(summaryPage) {
+        let page = summaryPage;
+        if (summaryPage.id) {
+            try {
+                const full = await apiRequest(`/pages/${encodeURIComponent(summaryPage.id)}`);
+                if (full && full.url) page = full;
+            } catch {
+                // use summary fields cleanly
+            }
+        }
+
+        const internalLinks = page.internal_links || [];
+        const externalLinks = page.external_links || [];
+        const headings = page.headings || [];
+
+        DOM.inspectorModalTitle.textContent = page.title || page.url;
+        DOM.inspectorModalBody.innerHTML = `
+            <div class="inspector-section">
+                <span class="inspector-label">TARGET & FINAL URL</span>
+                <div class="form-row">
+                    <a href="${escapeHtml(page.url)}" target="_blank" rel="noopener noreferrer" class="inspector-url font-mono flex-1">${escapeHtml(page.url)}</a>
+                    <button type="button" class="telemetry-btn secondary-btn" id="insp-copy-url-btn">COPY URL</button>
+                </div>
+                ${page.final_url && page.final_url !== page.url ? `<div class="text-muted font-mono" style="font-size:11px;">Final redirect: ${escapeHtml(page.final_url)}</div>` : ''}
+                ${page.canonical_url ? `<div class="text-muted font-mono" style="font-size:11px;">Canonical: ${escapeHtml(page.canonical_url)}</div>` : ''}
+            </div>
+
+            <div class="inspector-metrics-grid">
+                <div class="insp-stat"><span class="insp-stat-label">HTTP STATUS</span><span class="insp-stat-val font-mono">${page.status_code || 0}</span></div>
+                <div class="insp-stat"><span class="insp-stat-label">LATENCY</span><span class="insp-stat-val font-mono text-cyan">${page.latency_ms || 0} ms</span></div>
+                <div class="insp-stat"><span class="insp-stat-label">SIZE</span><span class="insp-stat-val font-mono">${formatBytes(page.content_length)}</span></div>
+                <div class="insp-stat"><span class="insp-stat-label">DEPTH</span><span class="insp-stat-val font-mono">${page.depth || 0}</span></div>
+            </div>
+
+            ${page.error_message ? `<div class="inspector-section"><span class="inspector-label text-rose">ERROR DETAILS</span><div class="inspector-text text-rose font-mono">${escapeHtml(page.error_message)}</div></div>` : ''}
+            ${page.description ? `<div class="inspector-section"><span class="inspector-label">META DESCRIPTION</span><div class="inspector-text">${escapeHtml(page.description)}</div></div>` : ''}
+            ${headings.length ? `<div class="inspector-section"><span class="inspector-label">EXTRACTED HEADINGS (${headings.length})</span><div class="inspector-link-list">${headings.map(h => `<div class="font-mono" style="font-size:11px;">${escapeHtml(h)}</div>`).join('')}</div></div>` : (page.h1 ? `<div class="inspector-section"><span class="inspector-label">PRIMARY H1</span><div class="inspector-text font-mono">${escapeHtml(page.h1)}</div></div>` : '')}
+            ${page.extracted_text ? `<div class="inspector-section"><span class="inspector-label">EXTRACTED TEXT EXCERPT</span><div class="inspector-text" style="max-height:140px;overflow-y:auto;">${escapeHtml(page.extracted_text.slice(0, 1200))}</div></div>` : ''}
+
+            <div class="inspector-section">
+                <span class="inspector-label">INTERNAL LINKS (${internalLinks.length})</span>
+                <div class="inspector-link-list">${internalLinks.length ? internalLinks.map(l => `<a href="${escapeHtml(l)}" target="_blank" rel="noopener noreferrer" class="insp-link font-mono">${escapeHtml(l)}</a>`).join('') : '<span class="text-muted">None extracted</span>'}</div>
+            </div>
+            <div class="inspector-section">
+                <span class="inspector-label">EXTERNAL LINKS (${externalLinks.length})</span>
+                <div class="inspector-link-list">${externalLinks.length ? externalLinks.map(l => `<a href="${escapeHtml(l)}" target="_blank" rel="noopener noreferrer" class="insp-link font-mono">${escapeHtml(l)}</a>`).join('') : '<span class="text-muted">None extracted</span>'}</div>
+            </div>
+        `;
+        const copyBtn = $('insp-copy-url-btn');
+        if (copyBtn) copyBtn.addEventListener('click', () => copyToClipboard(page.url, 'Page URL'));
+        DOM.pageInspectorModal.classList.remove('hidden');
+    }
+
+    // =========================================================================
+    // DOMAINS REGISTRY (VIEW 5)
+    // =========================================================================
+    async function fetchDomains() {
+        if (!DOM.domainsBarsView) return;
+        try {
+            const res = await apiRequest('/domains?limit=100');
+            state.cachedDomains = Array.isArray(res) ? res : (res.domains || []);
+            renderDomainsList();
+        } catch (err) {
+            DOM.domainsBarsView.innerHTML = `<div class="empty-state-notice"><span class="text-rose">Failed fetching domains: ${escapeHtml(err.message)}</span></div>`;
+        }
+    }
+
+    function renderDomainsList() {
+        const kw = DOM.domainFilterInput ? DOM.domainFilterInput.value.toLowerCase().trim() : '';
+        const list = kw ? state.cachedDomains.filter(d => d.domain.toLowerCase().includes(kw)) : state.cachedDomains;
+        if (list.length === 0) {
+            DOM.domainsBarsView.innerHTML = `<div class="empty-state-notice"><span>No traversed host domains recorded yet.</span></div>`;
+            return;
+        }
+        const maxPages = Math.max(...list.map(d => d.total_pages || 1), 1);
+        DOM.domainsBarsView.innerHTML = list.map(d => {
+            const pct = Math.max(4, Math.round(((d.total_pages || 0) / maxPages) * 100));
+            return `
+                <div class="domain-stat-row">
+                    <div class="domain-info-col">
+                        <span class="domain-host font-mono">${escapeHtml(d.domain)}</span>
+                        <span class="domain-count font-mono">${formatNumber(d.total_pages)} pages • ${formatBytes(d.total_bytes || 0)}</span>
+                    </div>
+                    <div class="domain-bar-track"><div class="domain-bar-fill" style="width:${pct}%"></div></div>
+                    <div class="domain-latency-col font-mono text-muted">${d.avg_latency_ms || 0}ms avg • ${d.error_count || 0} err</div>
+                    <button type="button" class="btn-job-action" data-domain="${escapeHtml(d.domain)}">Search Host</button>
+                </div>
+            `;
+        }).join('');
+
+        DOM.domainsBarsView.querySelectorAll('[data-domain]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (DOM.searchDomainSelect) {
+                    populateDomainFilter().then(() => {
+                        DOM.searchDomainSelect.value = btn.dataset.domain;
+                        switchView('view-search');
+                        executeSearch(true);
+                    });
+                }
             });
         });
     }
 
     // =========================================================================
-    // 10. DOMAINS REGISTRY (VIEW 5)
-    // =========================================================================
-    async function fetchDomains() {
-        if (!DOM.domainsBarsView) return;
-        try {
-            const res = await apiRequest('/domains');
-            const domains = res.domains || [];
-            state.cachedDomains = domains;
-
-            if (domains.length === 0) {
-                DOM.domainsBarsView.innerHTML = `
-                    <div class="empty-state-notice">
-                        <span>No unique host domains registered yet</span>
-                    </div>
-                `;
-                return;
-            }
-
-            const maxPages = Math.max(...domains.map(d => d.total_pages || 1), 1);
-
-            DOM.domainsBarsView.innerHTML = domains.map(d => {
-                const count = d.total_pages || 0;
-                const pct = Math.min(100, Math.round((count / maxPages) * 100));
-                return `
-                    <div class="domain-stat-row">
-                        <div class="domain-info-col">
-                            <span class="domain-host font-mono">${escapeHtml(d.domain)}</span>
-                            <span class="domain-count font-mono">${count} page${count === 1 ? '' : 's'}</span>
-                        </div>
-                        <div class="domain-bar-track">
-                            <div class="domain-bar-fill" style="width: ${pct}%"></div>
-                        </div>
-                        <div class="domain-latency-col font-mono text-muted">
-                            ${d.avg_latency_ms || 0}ms avg
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        } catch (err) {
-            DOM.domainsBarsView.innerHTML = `
-                <div class="empty-state-notice">
-                    <span>Failed to retrieve domain distribution: ${escapeHtml(err.message)}</span>
-                </div>
-            `;
-        }
-    }
-
-    // =========================================================================
-    // 11. WORKER FLEET MONITOR (VIEW 6)
+    // WORKER FLEET MONITOR (VIEW 6)
     // =========================================================================
     async function fetchWorkers() {
         if (!DOM.workersGridContainer) return;
         try {
             const res = await apiRequest('/workers');
-            const workers = res.workers || [];
+            const workers = Array.isArray(res) ? res : (res.workers || []);
             state.cachedWorkers = workers;
-
-            if (DOM.sidebarWorkerCount) {
-                DOM.sidebarWorkerCount.textContent = workers.length;
-            }
+            if (DOM.sidebarWorkerCount) DOM.sidebarWorkerCount.textContent = workers.length;
 
             if (workers.length === 0) {
                 DOM.workersGridContainer.innerHTML = `
-                    <div class="empty-state-notice" style="grid-column: 1 / -1;">
-                        <span>No autonomous worker daemons registered. Mode B (Serverless) handles dispatches on demand.</span>
+                    <div class="empty-state-notice" style="grid-column:1/-1;">
+                        <strong>No Persistent Go Worker Daemons Connected</strong>
+                        <span>Distributed Crawler never fabricates dummy workers. Start real Go worker processes to populate the fleet:</span>
+                        <pre class="empty-code-snippet"># Option A: Docker Compose horizontal scaling
+docker compose up -d --scale worker=2
+
+# Option B: Native Go worker daemon
+go run cmd/worker/main.go -master http://localhost:8080 -concurrency 4</pre>
                     </div>
                 `;
                 return;
@@ -879,90 +1162,97 @@
 
             DOM.workersGridContainer.innerHTML = workers.map(w => {
                 const isOnline = w.status === 'ACTIVE' || w.status === 'IDLE';
-                const statusBadge = isOnline ? 'badge-emerald' : 'badge-amber';
+                const dotCls = isOnline ? 'dot-online' : (w.status === 'UNHEALTHY' ? 'dot-err' : 'dot-warn');
+                const badgeCls = isOnline ? 'badge-emerald' : (w.status === 'UNHEALTHY' ? 'badge-rose' : 'badge-amber');
                 return `
-                    <div class="worker-card">
+                    <div class="worker-card" data-worker-id="${escapeHtml(w.id)}">
                         <div class="worker-card-header">
                             <div class="worker-id-group">
-                                <span class="status-mini-dot ${isOnline ? 'dot-online' : 'dot-warn'}"></span>
-                                <h4 class="worker-id font-mono">${escapeHtml(w.worker_id)}</h4>
+                                <span class="status-mini-dot ${dotCls}"></span>
+                                <h4 class="worker-id font-mono">${escapeHtml(w.id)}</h4>
                             </div>
-                            <span class="badge ${statusBadge}">${escapeHtml(w.status)}</span>
+                            <span class="badge ${badgeCls}">${escapeHtml(w.status)}</span>
                         </div>
                         <div class="worker-details-grid">
-                            <div class="worker-stat-item">
-                                <span class="w-label">HEARTBEAT</span>
-                                <span class="w-val font-mono">${formatRelativeTime(w.last_heartbeat)}</span>
-                            </div>
-                            <div class="worker-stat-item">
-                                <span class="w-label">COMPLETED</span>
-                                <span class="w-val font-mono text-emerald">${formatNumber(w.tasks_completed || 0)}</span>
-                            </div>
-                            <div class="worker-stat-item">
-                                <span class="w-label">FAILED</span>
-                                <span class="w-val font-mono text-rose">${formatNumber(w.tasks_failed || 0)}</span>
-                            </div>
-                            <div class="worker-stat-item">
-                                <span class="w-label">AVG LATENCY</span>
-                                <span class="w-val font-mono text-cyan">${w.avg_latency_ms || 0} ms</span>
-                            </div>
+                            <div class="worker-stat-item"><span class="w-label">HOST / VER</span><span class="w-val font-mono">${escapeHtml(w.hostname || '-')} v${escapeHtml(w.version || '2.0')}</span></div>
+                            <div class="worker-stat-item"><span class="w-label">HEARTBEAT AGE</span><span class="w-val font-mono">${Math.round(w.last_seen_sec_ago || 0)}s ago</span></div>
+                            <div class="worker-stat-item"><span class="w-label">COMPLETED / FAIL</span><span class="w-val font-mono text-emerald">${w.tasks_completed || 0} / <span class="text-rose">${w.tasks_failed || 0}</span></span></div>
+                            <div class="worker-stat-item"><span class="w-label">AVG LATENCY</span><span class="w-val font-mono text-cyan">${w.avg_latency_ms || 0} ms</span></div>
                         </div>
-                        ${w.current_task ? `
-                            <div class="worker-current-task">
-                                <span class="w-label">CURRENT TASK</span>
-                                <div class="task-url-truncate font-mono">${escapeHtml(w.current_task)}</div>
-                            </div>
-                        ` : ''}
+                        <div class="worker-current-task">
+                            <span class="w-label">${w.current_task ? 'CURRENTLY CRAWLING' : 'ACTIVE SLOTS: ' + (w.tasks_active || 0)}</span>
+                            <div class="task-url-truncate font-mono">${escapeHtml(w.current_task || 'Idle polling frontier queue')}</div>
+                        </div>
                     </div>
                 `;
             }).join('');
+
+            DOM.workersGridContainer.querySelectorAll('.worker-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    const wk = workers.find(w => w.id === card.dataset.workerId);
+                    if (wk) openWorkerInspector(wk);
+                });
+            });
         } catch (err) {
-            DOM.workersGridContainer.innerHTML = `
-                <div class="empty-state-notice" style="grid-column: 1 / -1;">
-                    <span>Failed to inspect worker fleet: ${escapeHtml(err.message)}</span>
-                </div>
-            `;
+            DOM.workersGridContainer.innerHTML = `<div class="empty-state-notice" style="grid-column:1/-1;"><span class="text-rose">Failed querying workers: ${escapeHtml(err.message)}</span></div>`;
         }
     }
 
+    function openWorkerInspector(wk) {
+        DOM.entityModalBadge.textContent = `WORKER // ${wk.status}`;
+        DOM.entityModalTitle.textContent = wk.id;
+        DOM.entityModalBody.innerHTML = `
+            <div class="inspector-metrics-grid">
+                <div class="insp-stat"><span class="insp-stat-label">HOSTNAME</span><span class="insp-stat-val font-mono">${escapeHtml(wk.hostname)}</span></div>
+                <div class="insp-stat"><span class="insp-stat-label">VERSION</span><span class="insp-stat-val font-mono">${escapeHtml(wk.version || '2.0.0')}</span></div>
+                <div class="insp-stat"><span class="insp-stat-label">UPTIME</span><span class="insp-stat-val font-mono">${formatDurationSec(wk.uptime_sec || 0)}</span></div>
+                <div class="insp-stat"><span class="insp-stat-label">LAST HEARTBEAT</span><span class="insp-stat-val font-mono">${Math.round(wk.last_seen_sec_ago || 0)}s ago</span></div>
+            </div>
+            <div class="inspector-section">
+                <span class="inspector-label">EXECUTION COUNTERS</span>
+                <div class="inspector-text font-mono">Tasks Active: ${wk.tasks_active || 0} • Completed: ${wk.tasks_completed || 0} • Failed: ${wk.tasks_failed || 0} • Avg Latency: ${wk.avg_latency_ms || 0}ms</div>
+            </div>
+            ${wk.current_task ? `<div class="inspector-section"><span class="inspector-label">ACTIVE URL</span><div class="inspector-text font-mono">${escapeHtml(wk.current_task)}</div></div>` : ''}
+        `;
+        DOM.entityInspectorModal.classList.remove('hidden');
+    }
+
     // =========================================================================
-    // 12. AUDITABLE ACTIVITY STREAM (VIEW 7)
+    // ACTIVITY LOGS (VIEW 7)
     // =========================================================================
     async function fetchActivityLogs() {
         if (!DOM.activityTerminalFeed || state.feedPaused) return;
         try {
-            const res = await apiRequest('/activity');
-            const events = res.events || [];
+            const params = new URLSearchParams({ limit: '100' });
+            if (DOM.activitySeveritySelect && DOM.activitySeveritySelect.value) params.set('severity', DOM.activitySeveritySelect.value);
+            if (DOM.activitySearchInput && DOM.activitySearchInput.value.trim()) params.set('q', DOM.activitySearchInput.value.trim());
+
+            const res = await apiRequest(`/activity?${params.toString()}`);
+            const events = Array.isArray(res) ? res : (res.events || []);
             state.cachedEvents = events;
 
             if (events.length === 0) {
-                DOM.activityTerminalFeed.innerHTML = `
-                    <div class="terminal-line text-muted">[SYSTEM] Activity stream initialized. Awaiting crawl dispatches...</div>
-                `;
+                DOM.activityTerminalFeed.innerHTML = `<div class="terminal-line text-muted">[STREAM] No activity events match current filters.</div>`;
                 return;
             }
 
-            DOM.activityTerminalFeed.innerHTML = events.map(evt => {
-                const time = evt.created_at ? new Date(evt.created_at).toLocaleTimeString() : '00:00:00';
-                let typeColor = 'text-cyan';
-                if (evt.event_type.includes('ERROR') || evt.event_type.includes('FAIL')) typeColor = 'text-rose';
-                else if (evt.event_type.includes('COMPLET') || evt.event_type.includes('SUCCESS')) typeColor = 'text-emerald';
-                else if (evt.event_type.includes('LEASE')) typeColor = 'text-amber';
-
+            DOM.activityTerminalFeed.innerHTML = events.map(ev => {
+                const t = ev.created_at ? new Date(ev.created_at).toLocaleTimeString() : '--:--:--';
+                const sev = ev.severity || 'INFO';
+                const sevCls = sev === 'ERROR' ? 'text-rose' : (sev === 'WARN' ? 'text-amber' : 'text-emerald');
                 return `
                     <div class="terminal-line">
-                        <span class="term-time font-mono">[${time}]</span>
-                        <span class="term-type font-mono ${typeColor}">${escapeHtml(evt.event_type)}</span>
-                        ${evt.worker_id ? `<span class="term-worker font-mono">[${escapeHtml(evt.worker_id)}]</span>` : ''}
-                        <span class="term-msg">${escapeHtml(evt.message || '')}</span>
+                        <span class="term-time">[${escapeHtml(t)}]</span>
+                        <span class="term-type ${sevCls}">${escapeHtml(sev)}</span>
+                        <span class="term-type text-cyan">${escapeHtml(ev.event_type)}</span>
+                        ${ev.job_id ? `<span class="text-muted">[${escapeHtml(ev.job_id)}]</span>` : ''}
+                        ${ev.worker_id ? `<span class="term-worker">[${escapeHtml(ev.worker_id)}]</span>` : ''}
+                        <span class="term-msg">${escapeHtml(ev.message || ev.url || '')}</span>
                     </div>
                 `;
             }).join('');
-
-            // Auto-scroll to bottom of terminal
-            DOM.activityTerminalFeed.scrollTop = DOM.activityTerminalFeed.scrollHeight;
         } catch (err) {
-            // Quiet fail for activity feed
+            DOM.activityTerminalFeed.innerHTML = `<div class="terminal-line text-rose">[STREAM ERROR] ${escapeHtml(err.message)}</div>`;
         }
     }
 
@@ -970,264 +1260,174 @@
         if (DOM.feedPauseBtn) {
             DOM.feedPauseBtn.addEventListener('click', () => {
                 state.feedPaused = !state.feedPaused;
-                DOM.feedPauseBtn.textContent = state.feedPaused ? 'RESUME STREAM' : 'PAUSE';
+                DOM.feedPauseBtn.textContent = state.feedPaused ? 'RESUME' : 'PAUSE';
                 DOM.feedPauseBtn.classList.toggle('primary-btn', state.feedPaused);
             });
         }
-
         if (DOM.feedClearBtn) {
             DOM.feedClearBtn.addEventListener('click', () => {
-                if (DOM.activityTerminalFeed) {
-                    DOM.activityTerminalFeed.innerHTML = `
-                        <div class="terminal-line text-muted">[CONSOLE] Terminal feed cleared locally.</div>
-                    `;
-                }
+                DOM.activityTerminalFeed.innerHTML = `<div class="terminal-line text-muted">[LOCAL VIEW CLEARED] Backend persisted events remain intact. Click RESUME or switch tabs to reload.</div>`;
             });
+        }
+        if (DOM.feedCopyBtn) {
+            DOM.feedCopyBtn.addEventListener('click', () => {
+                const txt = state.cachedEvents.map(e => `[${e.created_at}] ${e.severity} ${e.event_type} ${e.message}`).join('\n');
+                copyToClipboard(txt || 'No events', 'Activity logs');
+            });
+        }
+        if (DOM.activitySeveritySelect) DOM.activitySeveritySelect.addEventListener('change', fetchActivityLogs);
+        if (DOM.activitySearchInput) DOM.activitySearchInput.addEventListener('input', fetchActivityLogs);
+    }
+
+    // =========================================================================
+    // ANALYTICS VIEW (VIEW 8)
+    // =========================================================================
+    async function fetchAnalytics() {
+        try {
+            const an = await apiRequest(`/analytics?range=${encodeURIComponent(state.analyticsRange)}`);
+            DOM.anAvgLatency.textContent = an.total_requests > 0 ? `${an.avg_latency_ms} ms` : '0 ms';
+            DOM.anLatencyDetail.textContent = `p50: ${an.p50_latency_ms || 0}ms • p95: ${an.p95_latency_ms || 0}ms`;
+            DOM.anSuccessRate.textContent = `${Number(an.success_rate || 0).toFixed(1)}%`;
+            DOM.anSuccessDetail.textContent = `${an.success_count || 0} ok / ${an.failed_count || 0} err`;
+            DOM.anRobotsRate.textContent = `${an.robots_blocked || 0} blocked`;
+            DOM.anLeaseReclaims.textContent = `${an.lease_reclaims || 0} reclaimed`;
+            DOM.anRetriesDetail.textContent = `${an.retry_count || 0} fetch retries executed`;
+
+            renderMiniBars(DOM.anStatusChart, an.status_breakdown || [], 'var(--color-emerald)');
+            renderMiniBars(DOM.anErrorChart, an.error_categories || [], 'var(--color-rose)');
+            renderMiniBars(DOM.anThroughputChart, (an.throughput_series || []).map(tp => ({
+                label: tp.bucket, count: tp.pages, suffix: `${tp.pages} pages (${tp.errors} err)`
+            })), 'var(--color-cyan)');
+
+            const jobItems = Object.entries(an.job_breakdown || {}).map(([label, count]) => ({ label, count }));
+            renderMiniBars(DOM.anJobsChart, jobItems, 'var(--color-purple)');
+        } catch (err) {
+            DOM.anLatencyDetail.textContent = `Analytics error: ${err.message}`;
         }
     }
 
     // =========================================================================
-    // 13. SETTINGS & TIERED RESETS (VIEW 9)
+    // SETTINGS & 7-TIER SAFE RESETS (VIEW 9)
     // =========================================================================
     function initSettingsView() {
-        // Populate current API input
-        if (DOM.backendUrlInput) {
-            DOM.backendUrlInput.value = state.apiBase;
-        }
+        if (DOM.backendUrlInput) DOM.backendUrlInput.value = state.apiBase;
+        if (DOM.adminTokenInput) DOM.adminTokenInput.value = state.adminToken;
 
         if (DOM.saveBackendUrlBtn) {
             DOM.saveBackendUrlBtn.addEventListener('click', async () => {
-                const newUrl = DOM.backendUrlInput.value.trim() || DEFAULT_API;
-                state.apiBase = newUrl;
-                localStorage.setItem('crawler_api_base', newUrl);
-                showToast(`Backend connection set to: ${newUrl}`, 'info');
+                const newBase = DOM.backendUrlInput.value.trim() || DEFAULT_API;
+                state.apiBase = newBase;
+                localStorage.setItem('crawler_api_base', newBase);
+                const status = await fetchSystemStatus();
+                showToast(status ? `Connected to ${newBase}` : `Failed connecting to ${newBase}`, status ? 'success' : 'error');
+            });
+        }
+
+        if (DOM.saveAdminTokenBtn) {
+            DOM.saveAdminTokenBtn.addEventListener('click', () => {
+                state.adminToken = DOM.adminTokenInput.value.trim();
+                sessionStorage.setItem('crawler_admin_token', state.adminToken);
+                showToast(state.adminToken ? 'Admin token saved to current browser session' : 'Admin token cleared', 'info');
+            });
+        }
+
+        const runReset = async (payload, okMsg) => {
+            try {
+                const res = await apiRequest('/reset', { method: 'POST', body: JSON.stringify(payload) });
+                showToast(res.message || okMsg, 'success');
                 await fetchSystemStatus();
-            });
-        }
-
-        // LEVEL A: Reset UI state
-        if (DOM.btnResetUi) {
-            DOM.btnResetUi.addEventListener('click', () => {
-                if (DOM.searchMainInput) DOM.searchMainInput.value = '';
-                state.activeSearchFilter = '0';
-                state.activeJobFilter = 'ALL';
-                DOM.searchChips.forEach(c => c.classList.remove('active'));
-                if (DOM.searchChips[0]) DOM.searchChips[0].classList.add('active');
-                if (DOM.jobStatusFilters) {
-                    DOM.jobStatusFilters.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
-                    if (DOM.jobStatusFilters.querySelector('[data-filter="ALL"]')) {
-                        DOM.jobStatusFilters.querySelector('[data-filter="ALL"]').classList.add('active');
-                    }
-                }
-                showToast('UI local state cleared', 'success');
-            });
-        }
-
-        // LEVEL B: Flush Redis Queue
-        if (DOM.btnResetQueue) {
-            DOM.btnResetQueue.addEventListener('click', async () => {
-                try {
-                    await apiRequest('/reset', {
-                        method: 'POST',
-                        body: JSON.stringify({ level: 'queue' })
-                    });
-                    showToast('Frontier queue successfully purged', 'success');
-                    await fetchSystemStatus();
-                } catch (err) {
-                    showToast(`Queue flush failed: ${err.message}`, 'error');
-                }
-            });
-        }
-
-        // LEVEL C: Purge Crawled Pages Data
-        if (DOM.btnResetData) {
-            DOM.btnResetData.addEventListener('click', async () => {
-                if (!confirm('Are you sure you want to purge all crawled pages and domain statistics?')) return;
-                try {
-                    await apiRequest('/reset', {
-                        method: 'POST',
-                        body: JSON.stringify({ level: 'data' })
-                    });
-                    showToast('Crawled pages database truncated', 'success');
-                    await fetchSystemStatus();
-                    if (state.currentView === 'view-search') executeSearch();
-                } catch (err) {
-                    showToast(`Data purge failed: ${err.message}`, 'error');
-                }
-            });
-        }
-
-        // LEVEL D: Full Production Reset
-        if (DOM.btnResetProd) {
-            DOM.btnResetProd.addEventListener('click', () => {
-                if (DOM.prodResetPhraseInput) DOM.prodResetPhraseInput.value = '';
-                if (DOM.confirmProdResetBtn) DOM.confirmProdResetBtn.disabled = true;
-                if (DOM.prodResetModal) DOM.prodResetModal.classList.remove('hidden');
-            });
-        }
-
-        if (DOM.cancelProdResetBtn) {
-            DOM.cancelProdResetBtn.addEventListener('click', () => {
-                if (DOM.prodResetModal) DOM.prodResetModal.classList.add('hidden');
-            });
-        }
-
-        if (DOM.prodResetPhraseInput) {
-            DOM.prodResetPhraseInput.addEventListener('input', () => {
-                const phrase = DOM.prodResetPhraseInput.value.trim();
-                DOM.confirmProdResetBtn.disabled = (phrase !== 'WIPE ALL DATA');
-            });
-        }
-
-        if (DOM.confirmProdResetBtn) {
-            DOM.confirmProdResetBtn.addEventListener('click', async () => {
-                try {
-                    await apiRequest('/reset', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            level: 'production',
-                            confirmation_phrase: 'WIPE ALL DATA'
-                        })
-                    });
-                    DOM.prodResetModal.classList.add('hidden');
-                    showToast('Cluster fully reset to clean production state', 'success');
-                    await fetchSystemStatus();
-                    refreshCurrentView();
-                } catch (err) {
-                    showToast(`Production reset failed: ${err.message}`, 'error');
-                }
-            });
-        }
-    }
-
-    // =========================================================================
-    // 14. PAGE INSPECTOR MODAL
-    // =========================================================================
-    function openInspectorModal(page) {
-        if (!DOM.pageInspectorModal || !page) return;
-
-        if (DOM.inspectorModalTitle) {
-            DOM.inspectorModalTitle.textContent = page.title || page.url;
-        }
-
-        const internalLinks = page.internal_links || [];
-        const externalLinks = page.external_links || [];
-
-        if (DOM.inspectorModalBody) {
-            DOM.inspectorModalBody.innerHTML = `
-                <div class="inspector-section">
-                    <span class="inspector-label">CANONICAL / TARGET URL</span>
-                    <a href="${escapeHtml(page.url)}" target="_blank" rel="noopener noreferrer" class="inspector-url font-mono">${escapeHtml(page.url)}</a>
-                </div>
-
-                <div class="inspector-metrics-grid">
-                    <div class="insp-stat">
-                        <span class="insp-stat-label">HTTP STATUS</span>
-                        <span class="insp-stat-val font-mono ${page.status_code === 200 ? 'text-emerald' : 'text-rose'}">${page.status_code || 200}</span>
-                    </div>
-                    <div class="insp-stat">
-                        <span class="insp-stat-label">LATENCY</span>
-                        <span class="insp-stat-val font-mono text-cyan">${page.latency_ms || 0} ms</span>
-                    </div>
-                    <div class="insp-stat">
-                        <span class="insp-stat-label">PAYLOAD SIZE</span>
-                        <span class="insp-stat-val font-mono">${formatBytes(page.content_length)}</span>
-                    </div>
-                    <div class="insp-stat">
-                        <span class="insp-stat-label">CRAWL DEPTH</span>
-                        <span class="insp-stat-val font-mono">${page.depth || 0}</span>
-                    </div>
-                </div>
-
-                ${page.meta_description ? `
-                    <div class="inspector-section">
-                        <span class="inspector-label">META DESCRIPTION</span>
-                        <p class="inspector-text">${escapeHtml(page.meta_description)}</p>
-                    </div>
-                ` : ''}
-
-                ${page.h1 ? `
-                    <div class="inspector-section">
-                        <span class="inspector-label">H1 HEADING</span>
-                        <p class="inspector-text font-mono">${escapeHtml(page.h1)}</p>
-                    </div>
-                ` : ''}
-
-                <div class="inspector-section">
-                    <span class="inspector-label">INTERNAL HYPERLINKS (${internalLinks.length})</span>
-                    <div class="inspector-link-list">
-                        ${internalLinks.length > 0 ? internalLinks.map(l => `<a href="${escapeHtml(l)}" target="_blank" rel="noopener noreferrer" class="insp-link font-mono">${escapeHtml(l)}</a>`).join('') : '<span class="text-muted">None discovered</span>'}
-                    </div>
-                </div>
-
-                <div class="inspector-section">
-                    <span class="inspector-label">EXTERNAL OUTBOUND HYPERLINKS (${externalLinks.length})</span>
-                    <div class="inspector-link-list">
-                        ${externalLinks.length > 0 ? externalLinks.map(l => `<a href="${escapeHtml(l)}" target="_blank" rel="noopener noreferrer" class="insp-link font-mono">${escapeHtml(l)}</a>`).join('') : '<span class="text-muted">None discovered</span>'}
-                    </div>
-                </div>
-            `;
-        }
-
-        DOM.pageInspectorModal.classList.remove('hidden');
-    }
-
-    function initInspectorModal() {
-        if (DOM.closeInspectorBtn) {
-            DOM.closeInspectorBtn.addEventListener('click', () => {
-                DOM.pageInspectorModal.classList.add('hidden');
-            });
-        }
-
-        if (DOM.pageInspectorModal) {
-            DOM.pageInspectorModal.addEventListener('click', (e) => {
-                if (e.target === DOM.pageInspectorModal) {
-                    DOM.pageInspectorModal.classList.add('hidden');
-                }
-            });
-        }
-
-        window.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                if (DOM.pageInspectorModal && !DOM.pageInspectorModal.classList.contains('hidden')) {
-                    DOM.pageInspectorModal.classList.add('hidden');
-                }
-                if (DOM.prodResetModal && !DOM.prodResetModal.classList.contains('hidden')) {
-                    DOM.prodResetModal.classList.add('hidden');
-                }
+                refreshCurrentView();
+            } catch (err) {
+                showToast(`Reset blocked: ${err.message}`, 'error');
             }
+        };
+
+        DOM.btnResetUi.addEventListener('click', () => {
+            if (DOM.searchMainInput) DOM.searchMainInput.value = '';
+            state.activeSearchFilter = '';
+            state.searchOffset = 0;
+            state.activeJobFilter = 'ALL';
+            showToast('Local UI view filters cleared', 'success');
+        });
+
+        DOM.btnResetCancelJob.addEventListener('click', () => {
+            const jobId = DOM.resetJobSelect.value;
+            if (!jobId) return showToast('Select a job ID first', 'error');
+            openConfirmDialog(`Cancel crawl job "${jobId}" and discard its pending tasks?`, () => runReset({ level: 'job', job_id: jobId }, 'Job cancelled'));
+        });
+
+        DOM.btnResetQueue.addEventListener('click', () => {
+            openConfirmDialog('Flush pending Redis queue and active leases? Existing indexed pages in PostgreSQL will be preserved.', () => runReset({ level: 'queue' }, 'Queue flushed'));
+        });
+
+        DOM.btnResetJobData.addEventListener('click', () => {
+            const jobId = DOM.resetJobSelect.value;
+            if (!jobId) return showToast('Select a job ID first', 'error');
+            openConfirmDialog(`Delete job "${jobId}" and ALL indexed pages/errors belonging to that job?`, () => runReset({ level: 'job_data', job_id: jobId }, 'Job data purged'));
+        });
+
+        DOM.btnResetData.addEventListener('click', () => {
+            openConfirmDialog('Purge ALL crawled pages and domain statistics? Job definitions and workers remain.', () => runReset({ level: 'data' }, 'Indexed data purged'));
+        });
+
+        DOM.btnResetDev.addEventListener('click', () => {
+            openConfirmDialog('Execute full development reset (clears frontier queue, jobs, events, and crawled pages)?', () => runReset({ level: 'dev' }, 'Dev environment reset'));
+        });
+
+        DOM.btnResetProd.addEventListener('click', () => {
+            DOM.prodResetPhraseInput.value = '';
+            DOM.confirmProdResetBtn.disabled = true;
+            DOM.prodResetModal.classList.remove('hidden');
+        });
+
+        const closeProdModal = () => DOM.prodResetModal.classList.add('hidden');
+        DOM.cancelProdResetBtn.addEventListener('click', closeProdModal);
+        DOM.closeProdModalBtn.addEventListener('click', closeProdModal);
+        DOM.prodResetPhraseInput.addEventListener('input', () => {
+            DOM.confirmProdResetBtn.disabled = DOM.prodResetPhraseInput.value.trim() !== 'WIPE ALL DATA';
+        });
+        DOM.confirmProdResetBtn.addEventListener('click', async () => {
+            closeProdModal();
+            await runReset({ level: 'production', confirmation_phrase: 'WIPE ALL DATA' }, 'Production cluster reset');
         });
     }
 
     // =========================================================================
-    // 15. VIEW REFRESH CONTROLLER
+    // MODALS & VIEW CONTROLLER
     // =========================================================================
+    function initModals() {
+        if (DOM.closeInspectorBtn) DOM.closeInspectorBtn.addEventListener('click', () => DOM.pageInspectorModal.classList.add('hidden'));
+        if (DOM.closeEntityBtn) DOM.closeEntityBtn.addEventListener('click', () => DOM.entityInspectorModal.classList.add('hidden'));
+
+        [DOM.pageInspectorModal, DOM.entityInspectorModal, DOM.prodResetModal, DOM.confirmModal].forEach(modal => {
+            if (!modal) return;
+            modal.addEventListener('click', e => {
+                if (e.target === modal) modal.classList.add('hidden');
+            });
+        });
+
+        window.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                [DOM.pageInspectorModal, DOM.entityInspectorModal, DOM.prodResetModal, DOM.confirmModal].forEach(m => {
+                    if (m) m.classList.add('hidden');
+                });
+            }
+        });
+    }
+
     function refreshCurrentView() {
         switch (state.currentView) {
-            case 'view-overview':
-                fetchSystemStatus();
-                break;
-            case 'view-jobs':
-                fetchJobs();
-                break;
-            case 'view-search':
-                executeSearch();
-                break;
-            case 'view-domains':
-                fetchDomains();
-                break;
-            case 'view-workers':
-                fetchWorkers();
-                break;
-            case 'view-activity':
-                fetchActivityLogs();
-                break;
+            case 'view-overview': fetchSystemStatus(); break;
+            case 'view-jobs': fetchJobs(); break;
+            case 'view-search': populateDomainFilter(); executeSearch(false); break;
+            case 'view-domains': fetchDomains(); break;
+            case 'view-workers': fetchWorkers(); break;
+            case 'view-activity': fetchActivityLogs(); break;
+            case 'view-analytics': fetchAnalytics(); break;
+            case 'view-settings': fetchJobs(); break;
         }
     }
 
-    // =========================================================================
-    // 16. APPLICATION INITIALIZATION
-    // =========================================================================
     function init() {
         initNavigation();
         initCrawlExplorer();
@@ -1235,29 +1435,27 @@
         initSearchView();
         initActivityView();
         initSettingsView();
-        initInspectorModal();
+        initModals();
 
-        // Header controls
-        if (DOM.autoCrawlToggle) {
-            DOM.autoCrawlToggle.addEventListener('click', toggleAutoCrawl);
+        if (DOM.domainFilterInput) DOM.domainFilterInput.addEventListener('input', renderDomainsList);
+        if (DOM.analyticsRangeSelect) {
+            DOM.analyticsRangeSelect.addEventListener('change', () => {
+                state.analyticsRange = DOM.analyticsRangeSelect.value;
+                fetchAnalytics();
+            });
         }
-        if (DOM.crawlStepBtn) {
-            DOM.crawlStepBtn.addEventListener('click', handleManualCrawlStep);
-        }
+        if (DOM.autoCrawlToggle) DOM.autoCrawlToggle.addEventListener('click', toggleAutoCrawl);
+        if (DOM.crawlStepBtn) DOM.crawlStepBtn.addEventListener('click', () => runCrawlStep(false));
 
-        // Initial fetch
         fetchSystemStatus();
-
-        // Recurring background telemetry polling every 3 seconds
         state.telemetryTimer = setInterval(() => {
             fetchSystemStatus();
-            if (state.currentView === 'view-activity' && !state.feedPaused) {
-                fetchActivityLogs();
-            }
-        }, 3000);
+            if (state.currentView === 'view-activity' && !state.feedPaused) fetchActivityLogs();
+            if (state.currentView === 'view-workers') fetchWorkers();
+            if (state.currentView === 'view-jobs') fetchJobs();
+        }, 4000);
     }
 
-    // Launch on DOM ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {

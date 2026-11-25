@@ -1,39 +1,22 @@
-// api/search.js - Query indexed pages by keyword
-const { getEngine, setCORS, BACKEND_URL } = require("./_engine");
+// api/search.js - Search indexed pages with filters, sorting & pagination
+const { getEngine, setCORS, proxyToBackend } = require("./_engine");
 
 module.exports = async function handler(req, res) {
     setCORS(res);
+    if (req.method === "OPTIONS") return res.status(200).end();
+    if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
-    if (req.method === "OPTIONS") {
-        return res.status(200).end();
-    }
+    if (await proxyToBackend(req, res, "/api/search")) return;
 
-    if (req.method !== "GET") {
-        return res.status(405).json({ error: "Method not allowed" });
-    }
-
-    const query = req.query.q || "";
-
-    // If external backend configured, attempt proxying first
-    if (BACKEND_URL) {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3000);
-            const backendRes = await fetch(`${BACKEND_URL}/api/search?q=${encodeURIComponent(query)}`, {
-                signal: controller.signal
-            }).catch(() => fetch(`${BACKEND_URL}/search?q=${encodeURIComponent(query)}`, { signal: controller.signal }));
-            clearTimeout(timeoutId);
-
-            if (backendRes && backendRes.ok) {
-                const data = await backendRes.json();
-                return res.status(200).json(data);
-            }
-        } catch {
-            // Fall back to edge engine on connection error
-        }
-    }
+    const q = (req.query && req.query.q) || "";
+    const domain = (req.query && req.query.domain) || "";
+    const status = (req.query && req.query.status) || "";
+    const from = (req.query && req.query.from) || "";
+    const to = (req.query && req.query.to) || "";
+    const sort = (req.query && req.query.sort) || "relevance";
+    const limit = Math.min(100, Math.max(1, parseInt((req.query && req.query.limit) || "20", 10) || 20));
+    const offset = Math.max(0, parseInt((req.query && req.query.offset) || "0", 10) || 0);
 
     const engine = getEngine();
-    const results = engine.search(query);
-    return res.status(200).json(results);
+    return res.status(200).json(engine.search({ q, domain, status, from, to, sort, limit, offset }));
 };

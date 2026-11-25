@@ -1,23 +1,15 @@
 // api/domains.js - Domain statistics and registry
-const { getEngine, setCORS, BACKEND_URL } = require("./_engine");
+const { getEngine, setCORS, proxyToBackend } = require("./_engine");
 
 module.exports = async function handler(req, res) {
     setCORS(res);
-
     if (req.method === "OPTIONS") return res.status(200).end();
-
-    if (BACKEND_URL) {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 4000);
-            const backendRes = await fetch(`${BACKEND_URL}/api/domains`, { signal: controller.signal });
-            clearTimeout(timeoutId);
-            if (backendRes.ok) return res.status(200).json(await backendRes.json());
-        } catch {
-            // fallback
-        }
-    }
+    if (await proxyToBackend(req, res, "/api/domains")) return;
 
     const engine = getEngine();
-    return res.status(200).json(engine.getDomains(50));
+    const domains = engine.getDomains(50);
+    return res.status(200).json({
+        domains,
+        total: domains.length
+    });
 };

@@ -1,23 +1,20 @@
-// api/crawl.js - Manually dispatch a crawler worker step
-const { getEngine, setCORS, BACKEND_URL } = require("./_engine");
+// api/crawl.js - Execute one bounded crawl step
+const { getEngine, setCORS, proxyToBackend } = require("./_engine");
 
 module.exports = async function handler(req, res) {
     setCORS(res);
+    if (req.method === "OPTIONS") return res.status(200).end();
+    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-    if (req.method === "OPTIONS") {
-        return res.status(200).end();
-    }
-
-    if (req.method !== "POST") {
-        return res.status(405).json({ error: "Method not allowed" });
-    }
+    if (await proxyToBackend(req, res, "/api/crawl", 16000)) return;
 
     const engine = getEngine();
-
-    // Check if a specific target URL was provided in request
-    const targetUrl = req.body && req.body.url ? req.body.url.trim() : null;
-    if (targetUrl) {
-        engine.submit([targetUrl]);
+    if (req.body && req.body.url) {
+        try {
+            await engine.submit({ urls: [req.body.url] });
+        } catch (err) {
+            return res.status(400).json({ error: err.message });
+        }
     }
 
     try {
@@ -25,19 +22,21 @@ module.exports = async function handler(req, res) {
         if (!result) {
             return res.status(200).json({
                 status: "queue_empty",
-                message: "No pending URLs in crawl frontier queue. Submit new seeds to continue."
+                message: "Frontier queue is empty. Submit new seeds to continue."
             });
         }
-
+        if (result.paused_only) {
+            return res.status(200).json({
+                status: "paused",
+                message: "Queued job is currently paused. Resume job to continue crawling."
+            });
+        }
         return res.status(200).json({
             status: "crawled",
             page: result.page,
             new_links_enqueued: result.new_links_enqueued
         });
     } catch (err) {
-        return res.status(500).json({
-            error: "Crawl step execution failed",
-            details: err.message
-        });
+        return res.status(500).json({ error: `Crawl step failed: ${err.message}` });
     }
 };
