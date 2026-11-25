@@ -1,103 +1,44 @@
 # GOPHER CRAWLER — OPERATIONAL RUNBOOK
 
-## 1. Routine Operations & Health Verification
+## 1. Health & Readiness Checks
 
-### 1.1 Cluster Health Check
-Execute the readiness probe to inspect database and Redis connectivity:
 ```bash
+curl -s http://localhost:8080/health | jq .
 curl -s http://localhost:8080/ready | jq .
+curl -s http://localhost:8080/api/metrics
 ```
-Expected output:
-```json
-{
-  "status": "ready",
-  "database": "connected",
-  "redis": "connected",
-  "time": "2026-11-24T15:30:00Z"
-}
-```
-
-### 1.2 Inspect Active Leases
-Check how many task leases are currently in flight:
-```bash
-curl -s http://localhost:8080/api/status | jq '.leases_active'
-```
+`/ready` returns HTTP `200` when both PostgreSQL and Redis respond within 2s, or `503` if either store is degraded.
 
 ---
 
-## 2. Distributed Task Lease Reclamation
+## 2. Task Lease Recovery & Worker Stale Detection
 
-### 2.1 How Task Leases Work
-When a worker claims a URL from the frontier queue, it acquires a 60-second lease stored in Redis under the `crawl:leases` hash. If the worker encounters a panic, network outage, or hardware failure before calling `AckTask`:
-- The Coordinator's background reaper detects leases older than 60 seconds during its 10-second inspection sweep.
-- Expired tasks are deleted from `crawl:leases` and pushed back to the head of `crawl:frontier`.
-- An event of type `LEASE_EXPIRED` is logged to `crawl_events`.
-
-### 2.2 Manual Lease Inspection
-To inspect in-flight leases in Redis directly:
-```bash
-docker exec -it distributed-crawler-redis redis-cli HGETALL crawl:leases
-```
-
-To manually purge stale leases without restarting:
-```bash
-docker exec -it distributed-crawler-redis redis-cli DEL crawl:leases
-```
+- **Leases:** `GetPoliteStructuredTask` writes an atomic JSON lease record to Redis hash `crawler:queue:leases`.
+- **Reaper Sweep:** Coordinator runs a background reaper every 2s. Any lease exceeding `TASK_LEASE_TIMEOUT_SEC` (default `60s`) is pushed back onto `crawler:queue`, and a `LEASE_RECLAIMED` event is persisted to PostgreSQL.
+- **Stale Workers:** Workers send heartbeats every 5s. Missing >15s transitions worker state to `UNHEALTHY` (`WORKER_STALE` event).
+- **Graceful Shutdown:** Sending `SIGINT` or `SIGTERM` to `cmd/worker` drains active slots and emits a final `STOPPED` heartbeat.
 
 ---
 
-## 3. Worker Node Health & Stale Worker Pruning
+## 3. Granular Safe Resets
 
-### 3.1 Heartbeat Protocol
-Workers send a JSON heartbeat every 5 seconds to `/api/heartbeat`. The coordinator updates `worker_registry.last_heartbeat`.
-
-### 3.2 Automated Pruning
-The Coordinator background reaper checks for stale workers every 10 seconds:
-- If `now - last_heartbeat > 15s`: The worker status is transitioned from `ACTIVE` to `DEAD`.
-- An event of type `WORKER_STALE` is logged.
-
-To list currently registered workers:
-```bash
-curl -s http://localhost:8080/api/workers | jq .
-```
+| Tier | API Payload | Scope & Effect | Auth / Guard |
+|------|-------------|----------------|--------------|
+| 1. UI | `{"level":"ui"}` | Clears browser filters only | None |
+| 2. Cancel Job | `{"level":"job","job_id":"..."}` | Marks job `CANCELLED` & discards tasks | Optional token |
+| 3. Flush Queue | `{"level":"queue"}` | Flushes pending queue & leases; keeps indexed pages | `ADMIN_API_TOKEN` |
+| 4. Purge Job | `{"level":"job_data","job_id":"..."}` | Deletes selected job + its pages/errors | `ADMIN_API_TOKEN` |
+| 5. Purge Data | `{"level":"data"}` | Clears crawled pages/domains; keeps jobs/workers | `ADMIN_API_TOKEN` |
+| 6. Dev Reset | `{"level":"dev"}` | Clears queue, jobs, pages, events | `ADMIN_API_TOKEN` |
+| 7. Production | `{"level":"production","confirmation_phrase":"WIPE ALL DATA"}` | Full wipe | `ENABLE_PRODUCTION_RESET=true` + Token + Phrase |
 
 ---
 
-## 4. Tiered Reset Procedures
+## 4. Database Backup & Upgrade Strategy
 
-Gopher Crawler provides four operational reset tiers:
+Migrations live in `pkg/db/migrations/001_initial_schema.sql` using idempotent `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, and advisory locking (`pg_advisory_lock`). Existing data is never dropped during upgrades.
 
-| Tier | Scope | Command / API Payload | Confirmation Required |
-|------|-------|-----------------------|-----------------------|
-| **Level A** | UI Search Filters & Cache | UI Button: "CLEAR UI" | No |
-| **Level B** | Redis Frontier Queue | `POST /api/reset` `{"level":"queue"}` | No |
-| **Level C** | Crawled Pages & Domain Stats | `POST /api/reset` `{"level":"data"}` | Confirmation Dialog |
-| **Level D** | Full Cluster Production Wipe | `POST /api/reset` `{"level":"production","confirmation_phrase":"WIPE ALL DATA"}` | Explicit Phrase Required |
-
-### Production Wipe via cURL
 ```bash
-curl -X POST http://localhost:8080/api/reset \
-  -H "Content-Type: application/json" \
-  -d '{"level":"production","confirmation_phrase":"WIPE ALL DATA"}'
+# Logical PostgreSQL backup
+pg_dump "$DATABASE_URL" > crawler_backup_$(date +%F).sql
 ```
-
----
-
-## 5. Troubleshooting Common Incidents
-
-### Incident 1: Frontier Queue Grows Unbounded
-- **Cause:** Discovered links exceed worker crawl capacity.
-- **Remedy:** Scale up workers:
-  ```bash
-  docker compose up -d --scale worker=5
-  ```
-- **Alternative:** Lower `max_depth` in job submissions.
-
-### Incident 2: High Error Ratio / HTTP 429 (Too Many Requests)
-- **Cause:** Politeness delay is too aggressive for target servers.
-- **Remedy:** Increase `politeness_delay_ms` (e.g. from 1000ms to 3000ms).
-
-### Incident 3: Target Server Blocked by SSRF Firewall
-- **Symptoms:** Error logs reporting `SSRF safety validation failed: target IP is private or loopback`.
-- **Explanation:** The crawler is engineered to protect against accessing private RFC 1918 networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) and cloud metadata (`169.254.169.254`).
-- **Remedy:** Verify target domain resolves to a valid public IP. For internal development and mock tests, use the unit testing suite where `SetAllowPrivateSubnets(true)` is explicitly authorized.

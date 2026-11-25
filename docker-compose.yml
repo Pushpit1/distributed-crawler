@@ -1,8 +1,8 @@
 services:
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping"]
       interval: 3s
@@ -12,15 +12,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: crawler_user
-      POSTGRES_PASSWORD: crawler_password
-      POSTGRES_DB: crawler_db
+      POSTGRES_USER: ${DB_USER:-crawler_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-crawler_password}
+      POSTGRES_DB: ${DB_NAME:-crawler_db}
     ports:
-      - "5433:5432" # Maps host port 5433 to container port 5432 (preventing host conflicts)
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U crawler_user -d crawler_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-crawler_user} -d ${DB_NAME:-crawler_db}"]
       interval: 3s
       timeout: 3s
       retries: 5
@@ -30,19 +30,25 @@ services:
       context: .
       dockerfile: Dockerfile.master
     ports:
-      - "8080:8080"
+      - "${MASTER_PORT:-8080}:8080"
     environment:
       REDIS_ADDR: redis:6379
-      DATABASE_URL: postgres://crawler_user:crawler_password@postgres:5432/crawler_db?sslmode=disable
+      DATABASE_URL: postgres://${DB_USER:-crawler_user}:${DB_PASSWORD:-crawler_password}@postgres:5432/${DB_NAME:-crawler_db}?sslmode=disable
       PORT: 8080
-      POLITENESS_MS: 1000 # Enforce 1-second delay per domain
+      POLITENESS_MS: ${POLITENESS_MS:-1000}
+      TASK_LEASE_TIMEOUT_SEC: ${TASK_LEASE_TIMEOUT_SEC:-60}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
+      ENABLE_PRODUCTION_RESET: ${ENABLE_PRODUCTION_RESET:-false}
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
-    # Start the Master with seeds and clear flags automatically
-    command: ["-clear", "https://go.dev"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   worker:
     build:
@@ -50,10 +56,32 @@ services:
       dockerfile: Dockerfile.worker
     environment:
       MASTER_URL: http://master:8080
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
     depends_on:
       master:
-        condition: service_started # Wait for master process to start
+        condition: service_healthy
     command: ["-timeout", "15"]
+
+  prometheus:
+    image: prom/prometheus:latest
+    profiles: ["monitoring"]
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      master:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    profiles: ["monitoring"]
+    ports:
+      - "${GRAFANA_PORT:-3002}:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    depends_on:
+      - prometheus
 
 volumes:
   pgdata:

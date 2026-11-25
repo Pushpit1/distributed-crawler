@@ -1,32 +1,28 @@
-# Stage 1: Build the Go binary statically
-FROM golang:alpine AS builder
+# Stage 1: Build statically linked Go Coordinator binary
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
-
-# Copy go.mod and go.sum files and download dependencies first (allows caching modules)
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy the rest of the application files
 COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o master ./cmd/master
 
-# Compile the Master binary statically to prevent dynamic library loading errors in thin runtimes
-RUN CGO_ENABLED=0 GOOS=linux go build -o master cmd/master/main.go
-
-# Stage 2: Final minimal runtime environment
+# Stage 2: Minimal hardened runtime image
 FROM alpine:latest
 
-# Install ca-certificates in case we connect to HTTPS seeds from the master
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates wget \
+    && adduser -D -u 10001 crawler
 
 WORKDIR /app
-
-# Copy the compiled binary and web assets from the builder stage
 COPY --from=builder /app/master .
 COPY --from=builder /app/web ./web
+RUN chown -R crawler:crawler /app
 
-# Expose the API port
+USER crawler
 EXPOSE 8080
 
-# Run the master executable by default
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+
 ENTRYPOINT ["/app/master"]

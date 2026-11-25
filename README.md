@@ -1,174 +1,79 @@
 # GOPHER CRAWLER ⚡
 ### Production-Grade Distributed Web Crawling, Indexing & Telemetry Platform
 
-A high-performance distributed web crawler and full-text search engine written in **Go**, backed by **Redis** (atomic FIFO frontier queue, politeness buffers, and task leases) and **PostgreSQL** (relational page index with GIN-indexed `tsvector` full-text search), accompanied by an obsidian dark-mode observability console.
-
-Inspired by the precision aesthetics of [Bonanza Studios](https://www.bonanza-studios.com) and [Descycle](https://www.descycle.com) — zero AI slop, high-density telemetry, real-time worker node heartbeats, and auditable event streams.
+A concurrent, distributed web crawling and full-text search platform engineered in **Go**, backed by **Redis** (structured FIFO frontier, politeness throttling, job pause/cancel sets, and atomic task leases) and **PostgreSQL** (relational persistence, SQL analytics aggregations, and GIN `tsvector` full-text search), paired with an obsidian telemetry console (10 views) deployable locally via Docker Compose or to Vercel.
 
 ---
 
 ## 🏛️ System Architecture
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │          OBSERVABILITY CONSOLE (UI)          │
-                  │   10-View Telemetry Dashboard & Controller   │
-                  └──────────────────────┬───────────────────────┘
-                                         │ HTTP REST API
-                                         ▼
-                  ┌──────────────────────────────────────────────┐
-                  │          Go Coordinator Master Node          │
-                  │  - Task Scheduling & In-Flight Leases        │
-                  │  - Per-Domain Politeness Enforcement         │
-                  │  - PostgreSQL Full-Text Search (tsvector)    │
-                  │  - Stale Worker Pruning & Lease Reaper       │
-                  └──────────────┬────────────────┬──────────────┘
-                                 │                │
-                 Task Leases     │                │ Save Pages & Search
-                 & Frontier FIFO │                │ GIN tsvector Index
-                                 ▼                ▼
-                     ┌────────────────┐     ┌────────────────┐
-                     │  Redis Frontier│     │   PostgreSQL   │
-                     │  - FIFO Queue  │     │ - Crawled Pages│
-                     │  - Dedup Set   │     │ - Domain Stats │
-                     │  - Task Leases │     │ - Job Registry │
-                     │  - Politeness  │     │ - Event Logs   │
-                     └────────────────┘     └────────────────┘
-                                ▲
-                                │ Claim Task Lease / Send Heartbeat
-                                │
-                     ┌──────────┴──────────┐
-                     │                     │
-             ┌───────────────┐     ┌───────────────┐
-             │ Crawler Node  │     │ Crawler Node  │
-             │   Worker #1   │     │   Worker #N   │
-             │- SSRF Dialer  │     │- SSRF Dialer  │
-             │- Robots Cache │     │- Robots Cache │
-             │- 10MB Limit   │     │- 10MB Limit   │
-             │- Heartbeat 5s │     │- Heartbeat 5s │
-             └───────┬───────┘     └───────┬───────┘
-                     │                     │
-                     └──────────┬──────────┘
-                                │ SSRF-Protected Outbound HTTP
-                                ▼
-                     ┌─────────────────────┐
-                     │  External Internet  │
-                     └─────────────────────┘
-```
+- **Coordinator Master (`cmd/master`, `internal/master`)**: REST API with request correlation IDs, per-IP rate limiting, CORS controls, optional admin authorization, Prometheus `/api/metrics`, SQL analytics engine, and background task lease reaper.
+- **Distributed Workers (`cmd/worker`, `internal/worker`)**: Autonomous processes running bounded concurrency pools, 5s heartbeats, `robots.txt` SSRF-safe compliance checks, exponential retries, and graceful `SIGINT`/`SIGTERM` draining.
+- **Security Layer (`pkg/crawler/safe_dialer.go`, `pkg/crawler/robots.go`)**: Blocks loopback (`127.0.0.0/8`, `::1`, `::ffff:127.0.0.1`), RFC 1918 private networks, cloud metadata (`169.254.169.254`), DNS rebinding in `DialContext`, redirect hopping (>5 hops / internal IPs), and 10MB body decompression bombs.
+- **PostgreSQL Storage (`pkg/db`)**: Advisory-locked idempotent migrations (`pkg/db/migrations/001_initial_schema.sql`), weighted full-text search, pagination, CSV/JSON exports, and 10 normalized tables.
+- **Dual-Mode Vercel Support (`api/`, `public/`)**: Operates either as a proxy to your Go Coordinator (`CRAWLER_BACKEND_URL`) or as an explicit `Serverless Preview` executor without fake workers.
 
 ---
 
-## 🚀 Key Highlights & Production Features
+## 🖥️ 10 Platform Views
 
-- **Distributed Task Scheduling with Atomic Leases:**
-  - Tasks claimed by workers receive a 60-second in-flight lease stored in Redis (`crawl:leases`).
-  - Master node's background reaper automatically reclaims tasks from abandoned or crashed workers back into `crawl:frontier`.
-- **SSRF Hardened Outbound Network Dialer:**
-  - Blocks loopback (`127.0.0.0/8`, `::1`), private RFC1918 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), and cloud metadata (`169.254.169.254`).
-  - Strict redirect policy (max 5 hops) verifying IP addresses at every successive hop against DNS rebinding.
-  - Streaming payload limit enforced at 10 Megabytes via `io.LimitReader`.
-- **Relational PostgreSQL Persistence & Ranked Search:**
-  - Automatic idempotent database migrations on startup.
-  - Documents indexed with native PostgreSQL `tsvector` and GIN index for millisecond keyword and phrase queries.
-  - Tracks canonical URLs, title, meta description, H1 heading, HTTP status code, latency, content length, and internal/external hyperlinks.
-- **Worker Node Fleet Management:**
-  - Workers self-register on startup and maintain a 5-second background heartbeat loop.
-  - Dynamic horizontal scaling (`docker compose up -d --scale worker=5`).
-- **Tiered Data Governance & Reset Safeguards:**
-  - **Level A (UI):** Clears search filters and browser cache.
-  - **Level B (Queue):** Flushes Redis frontier queue and active leases.
-  - **Level C (Data):** Purges crawled pages and domain statistics.
-  - **Level D (Production):** Wipes database, Redis, and restarts with starter seed. Guarded by mandatory `confirmation_phrase: "WIPE ALL DATA"`.
-
----
-
-## 🖥️ 10 Platform Views (UI Console)
-
-1. **Overview:** High-level telemetry cards (Pages, Domains, Queue, Workers), live dispatches, worker fleet snapshot, and uptime monitor.
-2. **Crawl Explorer:** Seed injector with preset pills (Go.dev, Hacker News, Wikipedia, GitHub), depth control, page ceiling, and SSRF feedback.
-3. **Jobs Manager:** Real-time job registry tracking max depth, pages crawled, timestamps, and Pause/Resume/Cancel controls.
-4. **Search Index:** Ranked full-text search with HTTP status filters (200 OK, 403 Forbidden, 5xx Errors) and interactive Page Inspector modal.
-5. **Domains:** Discovered domain distribution bar charts with page counts and average latency.
-6. **Worker Fleet:** Node status cards reporting heartbeats, completed/failed tasks, current active URL, and average latency.
-7. **Activity Logs:** High-density terminal stream of crawl dispatches, lease expirations, and worker lifecycle events.
-8. **Analytics:** Performance dashboard displaying average crawl latency, success ratios, and lease recovery statistics.
-9. **Settings & Resets:** Backend API endpoint switcher (`/api` or `http://localhost:8080`) and tiered data reset triggers.
-10. **Documentation:** Built-in system architecture and REST API endpoint reference.
+1. **Overview**: 10+ live metrics, top domains, recent crawls, recent jobs, worker fleet snapshot, health checks, and quick-start onboarding.
+2. **Crawl Explorer**: 5 functional presets (*Small Website*, *Documentation*, *Research*, *Domain Exploration*, *Custom*), domain allowlist, regex excludes, review panel.
+3. **Jobs Manager**: Filterable statuses (`QUEUED`, `RUNNING`, `PAUSED`, `COMPLETED`, `FAILED`, `CANCELLED`), progress bars, inspect modal, Pause/Resume/Retry/Cancel/Export.
+4. **Search Index**: Ranked full-text search with status class chips, domain selector, sorting, date filters, pagination, copy URL, Page Inspector modal, and CSV/JSON export.
+5. **Domains**: Real PostgreSQL host metrics (`total_pages`, `total_bytes`, `avg_latency_ms`, `error_count`).
+6. **Worker Fleet**: Real registered Go nodes, heartbeats, active task URLs, and clear empty-state onboarding CLI instructions.
+7. **Activity Logs**: Terminal stream with severity filter, keyword search, copy, pause/resume, and non-destructive clear view.
+8. **Analytics**: Backend SQL aggregations (`p50`/`p95` latency, 2xx success ratio, robots blocks, lease reclaims, HTTP code/error/throughput charts).
+9. **Settings & Resets**: Coordinator URL configuration, session `X-Admin-Token`, and 7 granular safe reset tiers.
+10. **Documentation**: Embedded architecture guide, worker startup snippet, and API reference.
 
 ---
 
 ## ⚡ Quick Start
 
-### Option 1: Full Distributed Cluster (Docker Compose)
-
-```bash
-# 1. Clone repository
-git clone https://github.com/Pushpit1/distributed-crawler.git
-cd distributed-crawler
-
-# 2. Launch master, workers, Redis, and PostgreSQL
-docker compose up -d --build
-
-# 3. Scale worker fleet
-docker compose up -d --scale worker=3
-
-# 4. Open dashboard in browser
-open http://localhost:8080
-```
-
-### Option 2: Local Development (Native Go)
-
-```bash
-# 1. Start dependencies
+### Windows / Linux Local Development
+```powershell
+# 1. Start PostgreSQL & Redis containers
 docker compose up -d redis postgres
 
-# 2. Run master coordinator
-go run cmd/master/main.go
+# 2. Run Coordinator Master (in terminal 1)
+go run ./cmd/master
 
-# 3. In another terminal, run worker
-go run cmd/worker/main.go
+# 3. Start Distributed Workers (in terminal 2+)
+go run ./cmd/worker -master http://localhost:8080 -concurrency 4
+
+# 4. Open Dashboard
+start http://localhost:8080
 ```
 
-### Option 3: Serverless Preview (Vercel)
-
+### Full Docker Cluster (+ Optional Prometheus & Grafana)
 ```bash
-# Run serverless test suite
-npm test
+cp .env.example .env
+docker compose up -d --build
+docker compose up -d --scale worker=3
 
-# Deploy to Vercel
-vercel --prod
+# With Prometheus + Grafana observability stack:
+docker compose --profile monitoring up -d --build
 ```
 
 ---
 
-## 🧪 Testing & Quality Assurance
-
-Run the comprehensive unit and integration test suite across all subsystems:
+## 🧪 Verification & Testing
 
 ```bash
-# Test all Go packages
-go test -v ./...
-
-# Vet codebase
 go vet ./...
-
-# Test serverless preview engine
-npm test
+go test -v ./...
+npm run build && npm run lint && npm test
+docker compose config --quiet
 ```
 
----
-
-## 📚 Technical Documentation
-
-- [System Architecture](docs/ARCHITECTURE.md)
-- [REST API Specification](docs/API.md)
-- [Deployment Guide](docs/DEPLOYMENT.md)
-- [Operational Runbook](docs/OPERATIONS.md)
-- [Security Specifications](docs/SECURITY.md)
-- [Project Audit & Findings](docs/PROJECT_AUDIT.md)
-- [Implementation Roadmap](docs/IMPLEMENTATION_ROADMAP.md)
-
----
-
-## 📄 License
-MIT License. Engineered for production-grade reliability and high-throughput web discovery.
+See detailed guides in [`docs/`](docs/):
+- [`docs/PROJECT_AUDIT.md`](docs/PROJECT_AUDIT.md)
+- [`docs/IMPLEMENTATION_ROADMAP.md`](docs/IMPLEMENTATION_ROADMAP.md)
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/API.md`](docs/API.md)
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
+- [`docs/SECURITY.md`](docs/SECURITY.md)
+- [`docs/TESTING_REPORT.md`](docs/TESTING_REPORT.md)

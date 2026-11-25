@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  go-backend:
+    name: Go Build, Vet & Race Tests
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: crawler_user
+          POSTGRES_PASSWORD: crawler_password
+          POSTGRES_DB: crawler_db
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U crawler_user -d crawler_db"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: Check gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Files not formatted cleanly:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Go Vet
+        run: go vet ./...
+
+      - name: Run Unit, Integration & Race Tests
+        env:
+          TEST_DATABASE_URL: postgres://crawler_user:crawler_password@localhost:5433/crawler_db?sslmode=disable
+          TEST_REDIS_ADDR: localhost:6379
+        run: go test -p 1 -v -race ./...
+
+      - name: Build Coordinator and Worker Binaries
+        run: |
+          go build -o bin/master ./cmd/master
+          go build -o bin/worker ./cmd/worker
+
+  frontend-and-serverless:
+    name: Frontend Sync, Lint & Vercel Engine Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npm run build
+      - run: npm run lint
+      - run: npm test
+
+  docker-compose-validation:
+    name: Validate Docker Images & Compose Config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose Schema
+        run: docker compose config --quiet
+      - name: Build Coordinator Image
+        run: docker build -f Dockerfile.master -t distributed-crawler-master:ci .
+      - name: Build Worker Image
+        run: docker build -f Dockerfile.worker -t distributed-crawler-worker:ci .

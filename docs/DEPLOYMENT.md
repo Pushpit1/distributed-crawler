@@ -1,117 +1,72 @@
 # GOPHER CRAWLER — PRODUCTION DEPLOYMENT GUIDE
 
-Gopher Crawler supports two robust deployment topologies depending on operational requirements:
-1. **Mode A: Full Distributed Cluster** (Production-grade Go Coordinator + Distributed Go Workers + Redis + PostgreSQL).
-2. **Mode B: Serverless Preview** (Vercel Serverless Functions + Upstash Redis + Neon/Supabase PostgreSQL + Static CDN Console).
+Gopher Crawler supports two clearly distinct deployment topologies:
+1. **Mode A: Full Distributed Cluster** (Go Coordinator Master + Independent Go Workers + Redis + PostgreSQL).
+2. **Mode B: Serverless Preview / Proxy** (Vercel CDN + Node Serverless API).
 
 ---
 
-## 1. Mode A: Full Distributed Cluster (Docker / Kubernetes / VMs)
+## 1. Mode A: Full Distributed Cluster (Docker / Render / Fly.io / VMs)
 
-This is the recommended deployment architecture for large-scale, high-throughput crawling.
-
-### 1.1 Prerequisites
-- Docker & Docker Compose v2+
-- 2+ CPU Cores, 4GB+ RAM
-
-### 1.2 Environment Variables Configuration
-Create a `.env` file from `.env.example`:
+### 1.1 Environment Configuration
+Copy `.env.example` to `.env`:
 ```bash
-# Server Configuration
 PORT=8080
-MASTER_URL=http://master:8080
-
-# Database Configuration (PostgreSQL)
-DB_HOST=postgres
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=postgres
-DB_NAME=crawler_db
-DB_SSLMODE=disable
-
-# Redis Frontier Queue
+MASTER_PORT=8080
+POSTGRES_PORT=5433
+REDIS_PORT=6379
+DATABASE_URL=postgres://crawler_user:crawler_password@postgres:5432/crawler_db?sslmode=disable
 REDIS_ADDR=redis:6379
-REDIS_PASSWORD=
-
-# Crawler Politeness & Performance
-DEFAULT_POLITENESS_MS=1000
-MAX_CRAWL_DEPTH=3
-MAX_PAGES_PER_JOB=500
+POLITENESS_MS=1000
+WORKER_CONCURRENCY=4
 TASK_LEASE_TIMEOUT_SEC=60
+
+# Security & Admin Controls (set strong token in production)
+ADMIN_API_TOKEN=
+ENABLE_PRODUCTION_RESET=false
+CORS_ALLOWED_ORIGINS=
+RATE_LIMIT_RPM=180
 ```
+*Note: If ports `8080`, `5433`, or `6379` are occupied on your host machine, override `MASTER_PORT`, `POSTGRES_PORT`, and `REDIS_PORT` in `.env`.*
 
-### 1.3 Launching with Docker Compose
-The included `docker-compose.yml` launches:
-- 1x Coordinator Master (`cmd/master`)
-- 2x Autonomous Worker Daemons (`cmd/worker`)
-- 1x Redis instance (Port 6379)
-- 1x PostgreSQL instance (Port 5433 host / 5432 container)
-
-Run:
+### 1.2 Running Core Cluster with Docker Compose
 ```bash
 docker compose up -d --build
+# Scale to multiple independent worker daemons
+docker compose up -d --scale worker=3
 ```
 
-Verify service health:
+### 1.3 Running Cluster + Prometheus & Grafana Monitoring Stack
 ```bash
-docker compose ps
-curl http://localhost:8080/health
-curl http://localhost:8080/ready
+docker compose --profile monitoring up -d --build
+# Prometheus: http://localhost:9091 (scrapes master:8080/api/metrics)
+# Grafana:    http://localhost:3002 (import deploy/grafana/dashboard.json)
 ```
 
-### 1.4 Horizontal Worker Scaling
-Scale the worker fleet dynamically without restarting the coordinator:
-```bash
-docker compose up -d --scale worker=5
+### 1.4 Native Windows / Linux Development Workflow
+```powershell
+# 1. Start Redis & PostgreSQL
+docker compose up -d redis postgres
+
+# 2. Run Coordinator Master
+go run ./cmd/master
+
+# 3. Start one or more Worker Daemons
+go run ./cmd/worker -master http://localhost:8080 -concurrency 4
 ```
-Each worker automatically self-registers with the coordinator and begins processing frontier leases.
+
+### 1.5 Persistent Coordinator Hosting (Fly.io / Render / Railway / AWS ECS)
+Deploy `Dockerfile.master` and `Dockerfile.worker` against managed PostgreSQL (Neon / Supabase / RDS) and managed Redis (Upstash / Elasticache / Redis Cloud), passing `DATABASE_URL` and `REDIS_ADDR` via environment variables. Point Vercel's `CRAWLER_BACKEND_URL` environment variable to the Coordinator HTTPS URL.
 
 ---
 
-## 2. Mode B: Vercel Serverless Preview Deployment
+## 2. Mode B: Vercel Frontend & Serverless Deployment
 
-For serverless deployments and cloud preview testing without running dedicated container hosts.
+- **Frontend Assets:** Served statically from `/public` (kept synced with `/web` via `npm run build`).
+- **API Proxy Mode (Recommended with Vercel):** Set `CRAWLER_BACKEND_URL=https://your-coordinator-domain.com` in Vercel project settings. All `/api/*` endpoints proxy directly to the live Go Coordinator with `X-Admin-Token` and `Authorization` forwarding.
+- **Serverless Preview Mode (Standalone):** When `CRAWLER_BACKEND_URL` is unset, `/api/*` executes bounded in-memory crawls on demand and explicitly tags UI status as `MODE B: SERVERLESS PREVIEW` with `0` persistent workers (never fabricating cluster workers).
 
-### 2.1 Architecture
-- **Frontend Console:** Static HTML/CSS/JS served directly via Vercel Edge CDN (`/public`).
-- **Serverless API Routes:** Node.js serverless functions under `/api/*` handling dispatches, searches, and resets.
-- **External Redis:** Upstash Redis (Serverless).
-- **External PostgreSQL:** Neon, Supabase, or AWS RDS.
-
-### 2.2 Vercel Configuration (`vercel.json`)
-```json
-{
-  "version": 2,
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/health", "destination": "/api/health" },
-    { "source": "/ready", "destination": "/api/ready" },
-    { "source": "/status", "destination": "/api/status" },
-    { "source": "/search", "destination": "/api/search" },
-    { "source": "/submit", "destination": "/api/submit" },
-    { "source": "/reset", "destination": "/api/reset" },
-    { "source": "/(.*)", "destination": "/$1" }
-  ]
-}
-```
-
-### 2.3 Deploying via Vercel CLI
 ```bash
 npm install -g vercel
-vercel login
 vercel --prod
 ```
-
-Configure Environment Variables in Vercel Project Settings:
-- `OPERATING_MODE`: `preview`
-- `DATABASE_URL`: `postgres://user:pass@ep-cool-db.us-east-2.aws.neon.tech/crawler_db?sslmode=require`
-- `REDIS_URL`: `rediss://default:token@cool-redis.upstash.io:6379`
-
----
-
-## 3. Health Checks & Monitoring
-
-Both deployment modes expose standard health probes:
-- `GET /health`: Liveness probe for load balancers.
-- `GET /ready`: Readiness check verifying database and Redis ping before routing traffic.
-- `GET /api/metrics`: Prometheus scraping endpoint.

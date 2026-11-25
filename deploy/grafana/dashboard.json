@@ -1,0 +1,57 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "title": "Gopher Distributed Crawler Telemetry",
+  "uid": "gopher-crawler-telemetry",
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Pages Indexed Total",
+      "type": "stat",
+      "targets": [{ "expr": "crawl_pages_indexed_total", "refId": "A" }],
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "title": "Frontier Queue Depth",
+      "type": "stat",
+      "targets": [{ "expr": "crawl_queue_depth", "refId": "A" }],
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 }
+    },
+    {
+      "id": 3,
+      "title": "Active Workers",
+      "type": "stat",
+      "targets": [{ "expr": "crawl_workers_active", "refId": "A" }],
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 }
+    },
+    {
+      "id": 4,
+      "title": "Average Crawl Duration (ms)",
+      "type": "stat",
+      "targets": [{ "expr": "crawl_request_duration", "refId": "A" }],
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
+    },
+    {
+      "id": 5,
+      "title": "Crawl Requests Success vs Failed",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(crawl_requests_success_total[1m])", "legendFormat": "Success/s", "refId": "A" },
+        { "expr": "rate(crawl_requests_failed_total[1m])", "legendFormat": "Failed/s", "refId": "B" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 }
+    },
+    {
+      "id": 6,
+      "title": "Active vs Completed Jobs",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "crawl_jobs_active", "legendFormat": "Active Jobs", "refId": "A" },
+        { "expr": "crawl_jobs_completed", "legendFormat": "Completed Jobs", "refId": "B" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 }
+    }
+  ]
+}
