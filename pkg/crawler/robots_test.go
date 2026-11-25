@@ -38,6 +38,14 @@ func TestRobotsCache_IsAllowed(t *testing.T) {
 
 	// Initialize cache matching our User-Agent
 	cache := NewRobotsCache("MyCrawlerBot")
+
+	// Verify SSRF firewall blocks private/loopback targets by default BEFORE hitting cache/network
+	if _, ssrfErr := cache.IsAllowed(context.Background(), mockServer.URL+"/public/index.html"); ssrfErr == nil {
+		t.Fatal("Expected default RobotsCache to block loopback URL by SSRF policy")
+	}
+
+	// Permit local mock server strictly for deterministic unit testing
+	cache.SetAllowPrivateSubnets(true)
 	ctx := context.Background()
 
 	tests := []struct {

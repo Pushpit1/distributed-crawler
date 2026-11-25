@@ -36,7 +36,7 @@ func main() {
 	// Connection string format: postgres://user:password@host:port/dbname?sslmode=disable
 	connStr := "postgres://crawler_user:crawler_password@localhost:5433/crawler_db?sslmode=disable"
 	log.Println("Connecting to PostgreSQL at localhost:5433...")
-	
+
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatalf("❌ Failed to initialize PostgreSQL driver: %v", err)

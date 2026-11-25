@@ -29,11 +29,11 @@ func setupTestFrontier(t *testing.T) (*Frontier, func()) {
 
 	frontier := NewFrontier(rdb, queueKey, setKey)
 
-	// Clean up any stale state before running tests
-	rdb.Del(context.Background(), queueKey, setKey)
+	// Clean up any stale state or lingering rate limit keys before running tests
+	rdb.Del(context.Background(), queueKey, setKey, queueKey+":leases", queueKey+":paused_jobs", queueKey+":cancelled_jobs", "rate_limit:host:example.com")
 
 	cleanup := func() {
-		rdb.Del(context.Background(), queueKey, setKey)
+		rdb.Del(context.Background(), queueKey, setKey, queueKey+":leases", queueKey+":paused_jobs", queueKey+":cancelled_jobs", "rate_limit:host:example.com")
 		rdb.Close()
 	}
 
